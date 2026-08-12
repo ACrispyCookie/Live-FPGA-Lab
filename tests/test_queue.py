@@ -1,0 +1,35 @@
+from pathlib import Path
+
+from fpga_demo_platform.queue import JobQueue
+
+
+def test_submits_job_and_runs_gpgpu_integration_adapter(tmp_path):
+    queue = JobQueue(tmp_path / "jobs.sqlite3", artifacts_dir=tmp_path / "runs")
+
+    job = queue.submit("gpgpu-nbody", {"dataset": "default", "steps_per_frame": 2}, requester="test-client")
+    assert job.status == "queued"
+
+    result = queue.run_next()
+
+    assert result is not None
+    assert result.status == "succeeded"
+    assert result.demo_id == "gpgpu-nbody"
+    assert result.input == {"dataset": "default", "steps_per_frame": 2, "fps": 12.0}
+    assert result.result["demo"] == "gpgpu-nbody"
+    assert result.result["adapter"] == "gpgpu-interactive"
+    assert Path(result.artifact_dir).exists()
+    assert (Path(result.artifact_dir) / "summary.json").exists()
+
+
+def test_queue_blocks_second_concurrent_running_job(tmp_path):
+    queue = JobQueue(tmp_path / "jobs.sqlite3", artifacts_dir=tmp_path / "runs")
+
+    first = queue.submit("gpgpu-nbody", {"dataset": "default"})
+    second = queue.submit("gpgpu-nbody", {"dataset": "wide"})
+
+    claimed = queue.claim_next()
+    assert claimed.id == first.id
+    assert queue.claim_next() is None
+
+    queue.finish(claimed.id, status="succeeded", result={"ok": True})
+    assert queue.claim_next().id == second.id
