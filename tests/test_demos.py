@@ -19,11 +19,13 @@ def test_gpgpu_input_defaults_and_validation():
     assert demo.validate_input({}) == {
         "dataset": "default",
         "steps_per_frame": 1,
+        "kernel_calls": 1,
         "fps": 12.0,
     }
     assert demo.validate_input({"dataset": "wide", "steps_per_frame": 8, "fps": 24}) == {
         "dataset": "wide",
         "steps_per_frame": 8,
+        "kernel_calls": 1,
         "fps": 24.0,
     }
 

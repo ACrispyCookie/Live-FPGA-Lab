@@ -23,7 +23,7 @@ DEFAULT_XSDB = Path("/home/njason/Xilinx/2025.2/Vitis/bin/xsdb")
 
 def validate_input(payload: dict[str, Any] | None) -> dict[str, Any]:
     payload = dict(payload or {})
-    allowed = {"dataset", "steps_per_frame", "fps"}
+    allowed = {"dataset", "steps_per_frame", "kernel_calls", "fps"}
     unknown = sorted(set(payload) - allowed)
     if unknown:
         raise ValueError(f"unsupported input field(s): {', '.join(unknown)}")
@@ -36,6 +36,10 @@ def validate_input(payload: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(steps_per_frame, int) or not 1 <= steps_per_frame <= 10240:
         raise ValueError("steps_per_frame must be an integer from 1 to 10240")
 
+    kernel_calls = payload.get("kernel_calls", 1)
+    if not isinstance(kernel_calls, int) or not 1 <= kernel_calls <= 4:
+        raise ValueError("kernel_calls must be an integer from 1 to 4")
+
     fps = payload.get("fps", 12.0)
     if not isinstance(fps, int | float) or not 1.0 <= float(fps) <= 60.0:
         raise ValueError("fps must be a number from 1 to 60")
@@ -43,6 +47,7 @@ def validate_input(payload: dict[str, Any] | None) -> dict[str, Any]:
     return {
         "dataset": dataset,
         "steps_per_frame": steps_per_frame,
+        "kernel_calls": kernel_calls,
         "fps": float(fps),
     }
 
@@ -132,6 +137,7 @@ def run_gpgpu_nbody(
     artifact_dir.mkdir(parents=True, exist_ok=True)
     dataset = str(payload.get("dataset", "default"))
     steps_per_frame = int(payload.get("steps_per_frame", 1))
+    kernel_calls = int(payload.get("kernel_calls", 1))
     if program_board:
         program_gpgpu_board(root=demo_root, artifact_dir=artifact_dir)
     command = build_gpgpu_nbody_command(
@@ -140,7 +146,7 @@ def run_gpgpu_nbody(
         dataset=dataset,
         steps_per_frame=steps_per_frame,
         baud=baud,
-        kernel_calls=1,
+        kernel_calls=kernel_calls,
     )
     completed = subprocess.run(
         command,

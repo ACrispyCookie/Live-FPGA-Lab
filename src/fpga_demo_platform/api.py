@@ -6,13 +6,11 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from fpga_demo_platform.demos import list_demos
 from fpga_demo_platform.queue import JobQueue, job_to_dict
 from fpga_demo_platform.thermal import HardwareUnavailable
-from fpga_demo_platform.web import index_html
 
 
 class RunRequest(BaseModel):
@@ -41,9 +39,9 @@ def create_app(*, queue: JobQueue) -> FastAPI:
         allow_headers=["*"],
     )
 
-    @app.get("/", response_class=HTMLResponse)
-    def index() -> str:
-        return index_html()
+    @app.get("/")
+    def service_root() -> dict[str, str]:
+        return {"service": "fpga-demo-api", "status": "ok"}
 
     @app.get("/health")
     def health() -> dict[str, str]:

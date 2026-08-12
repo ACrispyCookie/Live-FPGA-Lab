@@ -24,7 +24,7 @@ def test_submits_job_and_runs_injected_runner(tmp_path):
     assert result is not None
     assert result.status == "succeeded"
     assert result.demo_id == "gpgpu-nbody"
-    assert result.input == {"dataset": "default", "steps_per_frame": 2, "fps": 12.0}
+    assert result.input == {"dataset": "default", "steps_per_frame": 2, "kernel_calls": 1, "fps": 12.0}
     assert result.result["demo"] == "gpgpu-nbody"
     assert result.result["adapter"] == "test-runner"
     assert Path(result.artifact_dir).exists()

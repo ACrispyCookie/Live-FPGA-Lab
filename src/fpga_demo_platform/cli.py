@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from fpga_demo_platform.api import app_from_paths
-from fpga_demo_platform.web import index_html
+from fpga_demo_platform.web import create_web_app
 from fpga_demo_platform.demos import list_demos
 from fpga_demo_platform.queue import JobQueue, job_to_dict
 
@@ -65,20 +65,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "web":
-        from fastapi import FastAPI
-        from fastapi.responses import HTMLResponse
         import uvicorn
 
-        app = FastAPI(title="FPGA Demo Web", version="0.1.0")
-
-        @app.get("/", response_class=HTMLResponse)
-        def index() -> str:
-            return index_html(api_base=args.api_base or "")
-
-        @app.get("/health")
-        def health() -> dict[str, str]:
-            return {"status": "ok"}
-
+        app = create_web_app(api_base=args.api_base or "")
         uvicorn.run(app, host=args.host, port=args.port)
         return 0
 

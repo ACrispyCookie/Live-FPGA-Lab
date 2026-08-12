@@ -2,11 +2,39 @@ from fastapi.testclient import TestClient
 
 from fpga_demo_platform.api import create_app
 from fpga_demo_platform.queue import JobQueue
+from fpga_demo_platform.web import create_web_app
 from tests.fakes import FakeThermalGuard
 
 
 def successful_runner(demo_id, payload, artifact_dir):
     return {"demo": demo_id, "adapter": "test-runner", "input": payload}
+
+
+def test_api_is_json_only_and_does_not_serve_webpage(tmp_path):
+    queue = JobQueue(
+        tmp_path / "jobs.sqlite3",
+        artifacts_dir=tmp_path / "runs",
+        thermal_guard=FakeThermalGuard(),
+    )
+    client = TestClient(create_app(queue=queue))
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.json() == {"service": "fpga-demo-api", "status": "ok"}
+    assert "Live FPGA Lab" not in response.text
+
+
+def test_static_web_app_embeds_api_base_without_api_routes():
+    client = TestClient(create_web_app(api_base="http://fpga-api.local"))
+
+    page = client.get("/")
+    assert page.status_code == 200
+    assert "Live FPGA Lab" in page.text
+    assert "http://fpga-api.local" in page.text
+    assert client.get("/health").json() == {"status": "ok", "service": "web"}
+    assert client.get("/api/demos").status_code == 404
 
 
 def test_api_lists_gpgpu_demo_and_runs_job(tmp_path):
