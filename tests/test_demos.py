@@ -1,13 +1,16 @@
 import pytest
 
-from fpga_demo_platform.demos import GPGPU_NBODY, get_demo, list_demos
+from fpga_demo_platform.demos import get_demo, list_demos
 
 
-def test_only_gpgpu_demo_is_registered_initially():
+def test_discovers_gpgpu_demo_from_demo_folder_definition():
     demos = list_demos()
 
-    assert demos == [GPGPU_NBODY]
-    assert get_demo("gpgpu-nbody").board == "HelloFPGA ZYNQ7000"
+    assert [demo.id for demo in demos] == ["gpgpu-nbody"]
+    demo = get_demo("gpgpu-nbody")
+    assert demo.board == "HelloFPGA ZYNQ7000"
+    assert demo.root.name == "gpgpu-nbody"
+    assert demo.definition_path.name == "demo_definition.py"
 
 
 def test_gpgpu_input_defaults_and_validation():

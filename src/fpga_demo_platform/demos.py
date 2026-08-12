@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+import importlib.util
+import os
 from dataclasses import dataclass
-from typing import Any, Literal
-
+from pathlib import Path
+from types import ModuleType
+from typing import Any, Callable, Literal
 
 DemoKind = Literal["zynq-ps-pl"]
+Validator = Callable[[dict[str, Any] | None], dict[str, Any]]
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_DEMOS_ROOT = Path(os.environ.get("FPGA_DEMO_ROOT", PROJECT_ROOT / "demos"))
+DEFINITION_FILE = "demo_definition.py"
 
 
 @dataclass(frozen=True)
@@ -14,50 +22,76 @@ class Demo:
     kind: DemoKind
     board: str
     summary: str
+    root: Path
+    definition_path: Path
+    validate_input_fn: Validator
 
     def validate_input(self, payload: dict[str, Any] | None) -> dict[str, Any]:
-        payload = dict(payload or {})
-        allowed = {"dataset", "steps_per_frame", "fps"}
-        unknown = sorted(set(payload) - allowed)
-        if unknown:
-            raise ValueError(f"unsupported input field(s): {', '.join(unknown)}")
-
-        dataset = payload.get("dataset", "default")
-        if not isinstance(dataset, str) or not dataset:
-            raise ValueError("dataset must be a non-empty string")
-
-        steps_per_frame = payload.get("steps_per_frame", 1)
-        if not isinstance(steps_per_frame, int) or not 1 <= steps_per_frame <= 10240:
-            raise ValueError("steps_per_frame must be an integer from 1 to 10240")
-
-        fps = payload.get("fps", 12.0)
-        if not isinstance(fps, int | float) or not 1.0 <= float(fps) <= 60.0:
-            raise ValueError("fps must be a number from 1 to 60")
-
-        return {
-            "dataset": dataset,
-            "steps_per_frame": steps_per_frame,
-            "fps": float(fps),
-        }
-
-
-GPGPU_NBODY = Demo(
-    id="gpgpu-nbody",
-    name="GPGPU n-body simulator",
-    kind="zynq-ps-pl",
-    board="HelloFPGA ZYNQ7000",
-    summary="Interactive n-body simulation running through the ZYNQ PS/PL GPGPU demo stack.",
-)
-
-DEMOS: dict[str, Demo] = {GPGPU_NBODY.id: GPGPU_NBODY}
+        return self.validate_input_fn(payload)
 
 
 def get_demo(demo_id: str) -> Demo:
+    demos = _demo_registry()
     try:
-        return DEMOS[demo_id]
+        return demos[demo_id]
     except KeyError as exc:
         raise KeyError(f"unknown demo '{demo_id}'") from exc
 
 
 def list_demos() -> list[Demo]:
-    return list(DEMOS.values())
+    return list(_demo_registry().values())
+
+
+def load_demo_module(demo: Demo) -> ModuleType:
+    return _load_module(demo.definition_path, module_name=f"fpga_demo_definition_{demo.id.replace('-', '_')}")
+
+
+def _demo_registry(root: Path = DEFAULT_DEMOS_ROOT) -> dict[str, Demo]:
+    demos: dict[str, Demo] = {}
+    if not root.exists():
+        return demos
+    for definition_path in sorted(root.glob(f"*/{DEFINITION_FILE}")):
+        module = _load_module(definition_path, module_name=f"fpga_demo_definition_{definition_path.parent.name}")
+        metadata = getattr(module, "DEMO", None)
+        validate_input = getattr(module, "validate_input", None)
+        if not isinstance(metadata, dict):
+            raise ValueError(f"{definition_path} must define DEMO metadata as a dict")
+        if not callable(validate_input):
+            raise ValueError(f"{definition_path} must define validate_input(payload)")
+        demo = Demo(
+            id=_require_str(metadata, "id", definition_path),
+            name=_require_str(metadata, "name", definition_path),
+            kind=_require_kind(metadata, definition_path),
+            board=_require_str(metadata, "board", definition_path),
+            summary=_require_str(metadata, "summary", definition_path),
+            root=definition_path.parent,
+            definition_path=definition_path,
+            validate_input_fn=validate_input,
+        )
+        if demo.id in demos:
+            raise ValueError(f"duplicate demo id '{demo.id}' from {definition_path}")
+        demos[demo.id] = demo
+    return demos
+
+
+def _load_module(path: Path, *, module_name: str) -> ModuleType:
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"could not load demo definition at {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _require_str(metadata: dict[str, Any], key: str, path: Path) -> str:
+    value = metadata.get(key)
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{path} DEMO['{key}'] must be a non-empty string")
+    return value
+
+
+def _require_kind(metadata: dict[str, Any], path: Path) -> DemoKind:
+    value = _require_str(metadata, "kind", path)
+    if value != "zynq-ps-pl":
+        raise ValueError(f"{path} DEMO['kind'] has unsupported value {value!r}")
+    return value

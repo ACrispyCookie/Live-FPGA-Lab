@@ -1,16 +1,16 @@
 from pathlib import Path
 
-from fpga_demo_platform.demos import get_demo
-from fpga_demo_platform.runners import (
-    build_gpgpu_nbody_command,
-    build_gpgpu_program_script,
-    run_gpgpu_nbody,
-)
+from fpga_demo_platform.demos import get_demo, load_demo_module
+
+
+def _gpgpu_module():
+    return load_demo_module(get_demo("gpgpu-nbody"))
 
 
 def test_build_gpgpu_nbody_command_points_at_curated_demo_tree(tmp_path):
+    module = _gpgpu_module()
     root = tmp_path / "demo-root"
-    command = build_gpgpu_nbody_command(
+    command = module.build_gpgpu_nbody_command(
         root=root,
         port="/dev/ttyUSB0",
         dataset="default",
@@ -32,8 +32,9 @@ def test_build_gpgpu_nbody_command_points_at_curated_demo_tree(tmp_path):
 
 
 def test_build_gpgpu_program_script_downloads_pl_initializes_ps_and_starts_app(tmp_path):
+    module = _gpgpu_module()
     root = tmp_path / "demo-root"
-    script = build_gpgpu_program_script(root=root)
+    script = module.build_gpgpu_program_script(root=root)
 
     assert f"fpga -file {root / 'bitstream' / 'gpgpu_system_hello.bit'}" in script
     assert f"source {root / 'boot' / 'ps7_init.tcl'}" in script
@@ -43,15 +44,17 @@ def test_build_gpgpu_program_script_downloads_pl_initializes_ps_and_starts_app(t
     assert "con" in script
 
 
-def test_run_gpgpu_nbody_records_subprocess_output(tmp_path):
+def test_gpgpu_demo_runner_records_subprocess_output(tmp_path):
+    module = _gpgpu_module()
+    demo = get_demo("gpgpu-nbody")
     demo_root = tmp_path / "demos" / "gpgpu-nbody"
     (demo_root / "programs").mkdir(parents=True)
     (demo_root / "programs" / "fpga_run.py").write_text("print(\"[SUCCESS] FPGA run loop complete\")")
 
-    result = run_gpgpu_nbody(
-        get_demo("gpgpu-nbody"),
-        {"dataset": "default", "steps_per_frame": 1, "fps": 12.0},
-        tmp_path / "artifacts",
+    result = module.run_gpgpu_nbody(
+        demo=demo,
+        payload={"dataset": "default", "steps_per_frame": 1, "fps": 12.0},
+        artifact_dir=tmp_path / "artifacts",
         demo_root=demo_root,
         port="/dev/ttyUSB0",
         program_board=False,
