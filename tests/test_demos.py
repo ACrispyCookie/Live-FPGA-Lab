@@ -3,10 +3,10 @@ import pytest
 from fpga_demo_platform.demos import get_demo, list_demos
 
 
-def test_discovers_gpgpu_demo_from_demo_folder_definition():
+def test_discovers_demo_folder_definitions():
     demos = list_demos()
 
-    assert [demo.id for demo in demos] == ["gpgpu-nbody"]
+    assert [demo.id for demo in demos] == ["gpgpu-nbody", "matrix-accelerator", "riscv-core", "signal-lab"]
     demo = get_demo("gpgpu-nbody")
     assert demo.board == "HelloFPGA ZYNQ7000"
     assert demo.root.name == "gpgpu-nbody"

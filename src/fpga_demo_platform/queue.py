@@ -10,9 +10,10 @@ from typing import Any, Callable, Literal
 
 from fpga_demo_platform.demos import get_demo
 from fpga_demo_platform.runners import run_demo
+from fpga_demo_platform.thermal import HardwareUnavailable, ThermalGuard
 
 
-JobStatus = Literal["queued", "running", "succeeded", "failed"]
+JobStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
 Runner = Callable[[str, dict[str, Any], Path], dict[str, Any]]
 
 
@@ -38,10 +39,12 @@ class JobQueue:
         artifacts_dir: str | Path,
         *,
         runner: Runner | None = None,
+        thermal_guard: ThermalGuard | None = None,
     ):
         self.db_path = Path(db_path)
         self.artifacts_dir = Path(artifacts_dir)
         self.runner = runner or _default_runner
+        self.thermal_guard = thermal_guard or ThermalGuard()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.artifacts_dir.mkdir(parents=True, exist_ok=True)
         self._init_db()
@@ -72,7 +75,10 @@ class JobQueue:
             )
 
     def submit(self, demo_id: str, payload: dict[str, Any] | None, requester: str | None = None) -> Job:
+        self.thermal_guard.assert_available()
         demo = get_demo(demo_id)
+        if not demo.available:
+            raise ValueError(f"demo '{demo_id}' is not implemented yet")
         clean_payload = demo.validate_input(payload)
         job_id = uuid.uuid4().hex
         now = _now()
@@ -93,7 +99,16 @@ class JobQueue:
             raise KeyError(f"unknown job '{job_id}'")
         return _job_from_row(row)
 
+    def list_recent(self, *, limit: int = 20) -> list[Job]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [_job_from_row(row) for row in rows]
+
     def claim_next(self) -> Job | None:
+        self._cancel_for_overload_if_needed()
         with self._connect() as conn:
             running = conn.execute("SELECT id FROM jobs WHERE status = 'running' LIMIT 1").fetchone()
             if running is not None:
@@ -115,7 +130,7 @@ class JobQueue:
         self,
         job_id: str,
         *,
-        status: Literal["succeeded", "failed"],
+        status: Literal["succeeded", "failed", "cancelled"],
         result: dict[str, Any] | None = None,
         error: str | None = None,
     ) -> Job:
@@ -140,9 +155,29 @@ class JobQueue:
             return None
         try:
             result = self.runner(job.demo_id, job.input, Path(job.artifact_dir or self.artifacts_dir / job.id))
+        except HardwareUnavailable as exc:
+            return self.finish(job.id, status="cancelled", error=str(exc), result={"thermal": exc.status.to_dict()})
         except Exception as exc:  # noqa: BLE001 - job failures must be captured, not crash worker
             return self.finish(job.id, status="failed", error=str(exc), result={})
         return self.finish(job.id, status="succeeded", result=result)
+
+    def thermal_status(self, *, refresh: bool = False) -> dict[str, Any]:
+        status = self.thermal_guard.status(refresh=refresh)
+        if not status.available:
+            self._cancel_running_jobs(status.reason or "FPGA is currently unavailable")
+        return status.to_dict()
+
+    def _cancel_for_overload_if_needed(self) -> None:
+        status = self.thermal_guard.status(refresh=True)
+        if not status.available:
+            self._cancel_running_jobs(status.reason or "FPGA is currently unavailable")
+            raise HardwareUnavailable(status.reason or "FPGA is currently unavailable", status=status)
+
+    def _cancel_running_jobs(self, reason: str) -> None:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT id FROM jobs WHERE status = 'running'").fetchall()
+        for row in rows:
+            self.finish(row["id"], status="cancelled", error=reason, result={"cancelled_by": "thermal_guard"})
 
 
 def job_to_dict(job: Job) -> dict[str, Any]:

@@ -12,6 +12,8 @@ DEMO = {
     "kind": "zynq-ps-pl",
     "board": "HelloFPGA ZYNQ7000",
     "summary": "Interactive n-body simulation running through the ZYNQ PS/PL GPGPU demo stack.",
+    "available": True,
+    "placeholder": False,
 }
 
 DEFAULT_UART_PORT = "/dev/ttyUSB0"

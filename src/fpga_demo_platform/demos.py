@@ -25,6 +25,8 @@ class Demo:
     root: Path
     definition_path: Path
     validate_input_fn: Validator
+    available: bool = True
+    placeholder: bool = False
 
     def validate_input(self, payload: dict[str, Any] | None) -> dict[str, Any]:
         return self.validate_input_fn(payload)
@@ -67,6 +69,8 @@ def _demo_registry(root: Path = DEFAULT_DEMOS_ROOT) -> dict[str, Demo]:
             root=definition_path.parent,
             definition_path=definition_path,
             validate_input_fn=validate_input,
+            available=bool(metadata.get("available", True)),
+            placeholder=bool(metadata.get("placeholder", False)),
         )
         if demo.id in demos:
             raise ValueError(f"duplicate demo id '{demo.id}' from {definition_path}")
