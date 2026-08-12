@@ -2,12 +2,12 @@
 name = "fpga-demo-platform"
 version = "0.1.0"
 description = "Safe job-queue platform for running approved FPGA demos from a portfolio page."
-readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.116.0",
   "uvicorn>=0.35.0",
   "pydantic>=2.11.0",
+  "pyserial>=3.5",
 ]
 
 [project.optional-dependencies]

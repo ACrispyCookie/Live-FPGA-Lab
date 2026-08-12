@@ -3,8 +3,16 @@ from pathlib import Path
 from fpga_demo_platform.queue import JobQueue
 
 
-def test_submits_job_and_runs_gpgpu_integration_adapter(tmp_path):
-    queue = JobQueue(tmp_path / "jobs.sqlite3", artifacts_dir=tmp_path / "runs")
+def successful_runner(demo_id, payload, artifact_dir):
+    return {"demo": demo_id, "adapter": "test-runner", "input": payload}
+
+
+def test_submits_job_and_runs_injected_runner(tmp_path):
+    queue = JobQueue(
+        tmp_path / "jobs.sqlite3",
+        artifacts_dir=tmp_path / "runs",
+        runner=successful_runner,
+    )
 
     job = queue.submit("gpgpu-nbody", {"dataset": "default", "steps_per_frame": 2}, requester="test-client")
     assert job.status == "queued"
@@ -16,7 +24,7 @@ def test_submits_job_and_runs_gpgpu_integration_adapter(tmp_path):
     assert result.demo_id == "gpgpu-nbody"
     assert result.input == {"dataset": "default", "steps_per_frame": 2, "fps": 12.0}
     assert result.result["demo"] == "gpgpu-nbody"
-    assert result.result["adapter"] == "gpgpu-interactive"
+    assert result.result["adapter"] == "test-runner"
     assert Path(result.artifact_dir).exists()
     assert (Path(result.artifact_dir) / "summary.json").exists()
 

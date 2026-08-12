@@ -6,13 +6,14 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from fpga_demo_platform.demos import get_demo
 from fpga_demo_platform.runners import run_demo
 
 
 JobStatus = Literal["queued", "running", "succeeded", "failed"]
+Runner = Callable[[str, dict[str, Any], Path], dict[str, Any]]
 
 
 @dataclass(frozen=True)
@@ -31,9 +32,16 @@ class Job:
 
 
 class JobQueue:
-    def __init__(self, db_path: str | Path, artifacts_dir: str | Path):
+    def __init__(
+        self,
+        db_path: str | Path,
+        artifacts_dir: str | Path,
+        *,
+        runner: Runner | None = None,
+    ):
         self.db_path = Path(db_path)
         self.artifacts_dir = Path(artifacts_dir)
+        self.runner = runner or _default_runner
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.artifacts_dir.mkdir(parents=True, exist_ok=True)
         self._init_db()
@@ -130,9 +138,8 @@ class JobQueue:
         job = self.claim_next()
         if job is None:
             return None
-        demo = get_demo(job.demo_id)
         try:
-            result = run_demo(demo, job.input, Path(job.artifact_dir or self.artifacts_dir / job.id))
+            result = self.runner(job.demo_id, job.input, Path(job.artifact_dir or self.artifacts_dir / job.id))
         except Exception as exc:  # noqa: BLE001 - job failures must be captured, not crash worker
             return self.finish(job.id, status="failed", error=str(exc), result={})
         return self.finish(job.id, status="succeeded", result=result)
@@ -152,6 +159,10 @@ def job_to_dict(job: Job) -> dict[str, Any]:
         "started_at": job.started_at,
         "finished_at": job.finished_at,
     }
+
+
+def _default_runner(demo_id: str, payload: dict[str, Any], artifact_dir: Path) -> dict[str, Any]:
+    return run_demo(get_demo(demo_id), payload, artifact_dir)
 
 
 def _job_from_row(row: sqlite3.Row) -> Job:

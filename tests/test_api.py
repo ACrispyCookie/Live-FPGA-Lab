@@ -4,8 +4,16 @@ from fpga_demo_platform.api import create_app
 from fpga_demo_platform.queue import JobQueue
 
 
+def successful_runner(demo_id, payload, artifact_dir):
+    return {"demo": demo_id, "adapter": "test-runner", "input": payload}
+
+
 def test_api_lists_gpgpu_demo_and_runs_job(tmp_path):
-    queue = JobQueue(tmp_path / "jobs.sqlite3", artifacts_dir=tmp_path / "runs")
+    queue = JobQueue(
+        tmp_path / "jobs.sqlite3",
+        artifacts_dir=tmp_path / "runs",
+        runner=successful_runner,
+    )
     client = TestClient(create_app(queue=queue))
 
     demos = client.get("/api/demos").json()
@@ -29,7 +37,7 @@ def test_api_lists_gpgpu_demo_and_runs_job(tmp_path):
 
     fetched = client.get(f"/api/jobs/{job_id}")
     assert fetched.status_code == 200
-    assert fetched.json()["result"]["adapter"] == "gpgpu-interactive"
+    assert fetched.json()["result"]["adapter"] == "test-runner"
 
 
 def test_api_rejects_invalid_input(tmp_path):
