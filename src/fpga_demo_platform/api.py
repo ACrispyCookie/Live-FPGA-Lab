@@ -1,16 +1,18 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from fpga_demo_platform.demos import list_demos
 from fpga_demo_platform.queue import JobQueue, job_to_dict
 from fpga_demo_platform.thermal import HardwareUnavailable
-from fpga_demo_platform.web import INDEX_HTML
+from fpga_demo_platform.web import index_html
 
 
 class RunRequest(BaseModel):
@@ -31,10 +33,17 @@ def demo_to_dict(demo) -> dict[str, Any]:
 
 def create_app(*, queue: JobQueue) -> FastAPI:
     app = FastAPI(title="FPGA Demo Platform", version="0.1.0")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins(),
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["*"],
+    )
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> str:
-        return INDEX_HTML
+        return index_html()
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -81,6 +90,12 @@ def create_app(*, queue: JobQueue) -> FastAPI:
         return job_to_dict(job)
 
     return app
+
+
+def _cors_origins() -> list[str]:
+    configured = os.environ.get("FPGA_DEMO_CORS_ORIGINS", "*")
+    origins = [origin.strip() for origin in configured.split(",") if origin.strip()]
+    return origins or ["*"]
 
 
 def app_from_paths(db_path: str | Path, artifacts_dir: str | Path) -> FastAPI:

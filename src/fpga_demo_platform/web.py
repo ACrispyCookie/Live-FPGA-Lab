@@ -1,5 +1,15 @@
 from __future__ import annotations
 
+import os
+
+API_BASE = os.environ.get("FPGA_DEMO_API_BASE", "")
+
+
+def index_html(*, api_base: str = API_BASE) -> str:
+    escaped = api_base.replace("\\", "\\\\").replace("'", "\\'")
+    return INDEX_HTML.replace("__FPGA_DEMO_API_BASE__", escaped)
+
+
 INDEX_HTML = """<!doctype html>
 <html lang="en">
 <head>
@@ -72,9 +82,10 @@ let demos = [];
 let activeJob = null;
 let activeDemo = null;
 let pollTimer = null;
+const API_BASE = '__FPGA_DEMO_API_BASE__';
 
 async function api(path, options) {
-  const res = await fetch(path, options);
+  const res = await fetch(`${API_BASE}${path}`, options);
   const text = await res.text();
   let data = text ? JSON.parse(text) : null;
   if (!res.ok) throw {status: res.status, data};
