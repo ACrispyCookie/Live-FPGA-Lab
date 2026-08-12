@@ -1,7 +1,11 @@
 from pathlib import Path
 
 from fpga_demo_platform.demos import get_demo
-from fpga_demo_platform.runners import build_gpgpu_nbody_command, run_gpgpu_nbody
+from fpga_demo_platform.runners import (
+    build_gpgpu_nbody_command,
+    build_gpgpu_program_script,
+    run_gpgpu_nbody,
+)
 
 
 def test_build_gpgpu_nbody_command_points_at_curated_demo_tree(tmp_path):
@@ -27,6 +31,18 @@ def test_build_gpgpu_nbody_command_points_at_curated_demo_tree(tmp_path):
     assert "--no-visualize" in command
 
 
+def test_build_gpgpu_program_script_downloads_pl_initializes_ps_and_starts_app(tmp_path):
+    root = tmp_path / "demo-root"
+    script = build_gpgpu_program_script(root=root)
+
+    assert f"fpga -file {root / 'bitstream' / 'gpgpu_system_hello.bit'}" in script
+    assert f"source {root / 'boot' / 'ps7_init.tcl'}" in script
+    assert "ps7_init" in script
+    assert "ps7_post_config" in script
+    assert f"dow {root / 'boot' / 'gpgpu_app.elf'}" in script
+    assert "con" in script
+
+
 def test_run_gpgpu_nbody_records_subprocess_output(tmp_path):
     demo_root = tmp_path / "demos" / "gpgpu-nbody"
     (demo_root / "programs").mkdir(parents=True)
@@ -38,9 +54,11 @@ def test_run_gpgpu_nbody_records_subprocess_output(tmp_path):
         tmp_path / "artifacts",
         demo_root=demo_root,
         port="/dev/ttyUSB0",
+        program_board=False,
     )
 
     assert result["status"] == "completed"
     assert result["adapter"] == "gpgpu-fpga-run"
+    assert result["programmed"] is False
     assert result["returncode"] == 0
     assert "FPGA run loop complete" in (tmp_path / "artifacts" / "stdout.log").read_text()
