@@ -32,6 +32,17 @@ class Demo:
         return self.validate_input_fn(payload)
 
 
+@dataclass(frozen=True)
+class Project:
+    id: str
+    name: str
+    source: str
+    source_ref: str
+    status: str
+    runnable: bool
+    demo_id: str | None = None
+
+
 def get_demo(demo_id: str) -> Demo:
     demos = _demo_registry()
     try:
@@ -44,16 +55,57 @@ def list_demos() -> list[Demo]:
     return list(_demo_registry().values())
 
 
+def list_projects() -> list[Project]:
+    projects: list[Project] = []
+    for definition_path, module in _definition_modules():
+        raw_projects = getattr(module, "PROJECTS", [])
+        if not isinstance(raw_projects, list):
+            raise ValueError(f"{definition_path} PROJECTS must be a list")
+        projects.extend(_project_from_dict(item, source_file=definition_path) for item in raw_projects)
+    return projects
+
+
+def get_project(project_id: str) -> Project:
+    for project in list_projects():
+        if project.id == project_id:
+            return project
+    raise KeyError(f"unknown project '{project_id}'")
+
+
+def project_to_dict(project: Project) -> dict[str, Any]:
+    lease = None
+    if project.runnable:
+        lease = {"duration_seconds": 180, "idle_timeout_seconds": 45, "extension_seconds": 60, "extension_allowed_when_queue_empty": True}
+    return {
+        "id": project.id,
+        "name": project.name,
+        "source": project.source,
+        "source_ref": project.source_ref,
+        "status": project.status,
+        "runnable": project.runnable,
+        "lease": lease,
+    }
+
+
+def run_demo(demo: Demo, payload: dict[str, Any], artifact_dir: Path) -> dict[str, Any]:
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    module = load_demo_module(demo)
+    runner = getattr(module, "run", None)
+    if not callable(runner):
+        raise ValueError(f"demo {demo.id!r} does not define run(demo, payload, artifact_dir)")
+    result = runner(demo=demo, payload=payload, artifact_dir=artifact_dir)
+    if not isinstance(result, dict):
+        raise TypeError(f"demo {demo.id!r} runner returned {type(result).__name__}, expected dict")
+    return result
+
+
 def load_demo_module(demo: Demo) -> ModuleType:
     return _load_module(demo.definition_path, module_name=f"fpga_demo_definition_{demo.id.replace('-', '_')}")
 
 
 def _demo_registry(root: Path = DEFAULT_DEMOS_ROOT) -> dict[str, Demo]:
     demos: dict[str, Demo] = {}
-    if not root.exists():
-        return demos
-    for definition_path in sorted(root.glob(f"*/{DEFINITION_FILE}")):
-        module = _load_module(definition_path, module_name=f"fpga_demo_definition_{definition_path.parent.name}")
+    for definition_path, module in _definition_modules(root):
         metadata = getattr(module, "DEMO", None)
         validate_input = getattr(module, "validate_input", None)
         if not isinstance(metadata, dict):
@@ -78,6 +130,15 @@ def _demo_registry(root: Path = DEFAULT_DEMOS_ROOT) -> dict[str, Demo]:
     return demos
 
 
+def _definition_modules(root: Path = DEFAULT_DEMOS_ROOT) -> list[tuple[Path, ModuleType]]:
+    if not root.exists():
+        return []
+    return [
+        (path, _load_module(path, module_name=f"fpga_demo_definition_{path.parent.name}"))
+        for path in sorted(root.glob(f"*/{DEFINITION_FILE}"))
+    ]
+
+
 def _load_module(path: Path, *, module_name: str) -> ModuleType:
     spec = importlib.util.spec_from_file_location(module_name, path)
     if spec is None or spec.loader is None:
@@ -85,6 +146,26 @@ def _load_module(path: Path, *, module_name: str) -> ModuleType:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _project_from_dict(item: dict[str, Any], *, source_file: Path) -> Project:
+    required = ["id", "name", "source", "source_ref", "status", "runnable"]
+    missing = [key for key in required if key not in item]
+    if missing:
+        raise ValueError(f"{source_file} PROJECTS item missing field(s): {', '.join(missing)}")
+    runnable = bool(item["runnable"])
+    demo_id = item.get("demo_id")
+    if runnable and not isinstance(demo_id, str):
+        raise ValueError(f"{source_file} runnable project {item['id']} must declare demo_id")
+    return Project(
+        id=str(item["id"]),
+        name=str(item["name"]),
+        source=str(item["source"]),
+        source_ref=str(item["source_ref"]),
+        status=str(item["status"]),
+        runnable=runnable,
+        demo_id=str(demo_id) if demo_id is not None else None,
+    )
 
 
 def _require_str(metadata: dict[str, Any], key: str, path: Path) -> str:

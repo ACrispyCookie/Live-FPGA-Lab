@@ -18,6 +18,16 @@ DEMO = {
     "placeholder": False,
 }
 
+PROJECTS = [
+    {"id": "ece338-gpgpu-nbody-3d", "name": "GPGPU n-body 3D", "source": "ECE338", "source_ref": "programs/nbody-3d", "status": "runnable", "runnable": True, "demo_id": "gpgpu-nbody"},
+    {"id": "ece338-gpgpu-nbody-2d", "name": "GPGPU n-body 2D", "source": "ECE338", "source_ref": "programs/nbody", "status": "source-only", "runnable": False},
+    {"id": "ece338-gpgpu-mandelbrot", "name": "GPGPU Mandelbrot", "source": "ECE338", "source_ref": "programs/mandelbrot", "status": "source-only", "runnable": False},
+    {"id": "ece338-gpgpu-differences", "name": "GPGPU Differences", "source": "ECE338", "source_ref": "programs/differences", "status": "source-only", "runnable": False},
+    {"id": "ece338-gpgpu-sobel", "name": "GPGPU Sobel", "source": "ECE338", "source_ref": "programs/sobel", "status": "source-only", "runnable": False},
+    {"id": "ece338-gpgpu-simple", "name": "GPGPU Simple", "source": "ECE338", "source_ref": "programs/simple", "status": "source-only", "runnable": False},
+    {"id": "ece338-gpgpu-stacktest", "name": "GPGPU Stack Test", "source": "ECE338", "source_ref": "programs/stacktest", "status": "source-only", "runnable": False},
+]
+
 DEFAULT_UART_PORT = "/dev/ttyUSB0"
 DEFAULT_BAUD = 115200
 DEFAULT_XSDB = Path("/home/njason/Xilinx/2025.2/Vitis/bin/xsdb")

@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict
 
-from fpga_demo_platform.projects import list_projects, project_to_dict
+from fpga_demo_platform.demos import list_projects, project_to_dict
 from fpga_demo_platform.sessions import SessionLimitExceeded, SessionManager, session_to_dict
 from fpga_demo_platform.thermal import HardwareUnavailable
 

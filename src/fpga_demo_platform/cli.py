@@ -7,8 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from fpga_demo_platform.api import app_from_paths
-from fpga_demo_platform.demos import get_demo, list_demos
-from fpga_demo_platform.runners import run_demo
+from fpga_demo_platform.demos import get_demo, list_demos, run_demo
 
 DEFAULT_DB = Path("state/sessions.sqlite3")
 DEFAULT_RUNS = Path("runs")
