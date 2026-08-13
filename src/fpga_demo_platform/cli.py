@@ -10,13 +10,13 @@ from fpga_demo_platform.api import app_from_paths
 from fpga_demo_platform.demos import get_demo, list_demos, run_demo
 
 DEFAULT_DB = Path("state/sessions.sqlite3")
-DEFAULT_RUNS = Path("runs")
+DEFAULT_ARTIFACTS = Path("state/session-artifacts")
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="fpga-demo")
     parser.add_argument("--db", type=Path, default=DEFAULT_DB)
-    parser.add_argument("--runs", type=Path, default=DEFAULT_RUNS)
+    parser.add_argument("--artifacts", type=Path, default=DEFAULT_ARTIFACTS)
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("list", help="List runnable demo definitions used internally by projects")
@@ -40,7 +40,7 @@ def main(argv: list[str] | None = None) -> int:
         payload = _parse_json_object(args.input)
         demo = get_demo(args.demo_id)
         validated = demo.validate_input(payload)
-        artifact_dir = args.runs / uuid.uuid4().hex
+        artifact_dir = args.artifacts / uuid.uuid4().hex
         result = run_demo(demo, validated, artifact_dir)
         print(json.dumps({"demo_id": demo.id, "status": "succeeded", "result": result, "artifact_dir": str(artifact_dir)}, indent=2, sort_keys=True))
         return 0
@@ -48,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "serve":
         import uvicorn
 
-        app = app_from_paths(args.db, args.runs)
+        app = app_from_paths(args.db, args.artifacts)
         uvicorn.run(app, host=args.host, port=args.port)
         return 0
 
