@@ -3,8 +3,10 @@ from __future__ import annotations
 import csv
 import json
 import shutil
+import socket
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -134,6 +136,97 @@ def program_gpgpu_board(*, root: Path, artifact_dir: Path, xsdb: Path = DEFAULT_
     (artifact_dir / "program-stderr.log").write_text(completed.stderr, encoding="utf-8")
     if completed.returncode != 0:
         raise RuntimeError(f"GPGPU board programming failed with exit code {completed.returncode}")
+
+
+def stream_gpgpu_programming(*, root: Path, artifact_dir: Path, emit_log, xsdb: Path = DEFAULT_XSDB) -> None:
+    script = build_gpgpu_program_script(root=root)
+    script_path = artifact_dir / "program-gpgpu.tcl"
+    script_path.write_text(script + "\n", encoding="utf-8")
+    stdout_path = artifact_dir / "program-stdout.log"
+    stderr_path = artifact_dir / "program-stderr.log"
+    process = subprocess.Popen(
+        [str(xsdb), str(script_path.resolve())],
+        cwd=root,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        bufsize=1,
+    )
+    with stdout_path.open("w", encoding="utf-8") as stdout_log, stderr_path.open("w", encoding="utf-8") as stderr_log:
+        assert process.stdout is not None
+        for raw in process.stdout:
+            line = raw.rstrip("\n")
+            stdout_log.write(raw)
+            stdout_log.flush()
+            emit_log("program_board", "stdout", line)
+        returncode = process.wait(timeout=5)
+        if returncode != 0:
+            message = f"GPGPU board programming failed with exit code {returncode}"
+            stderr_log.write(message + "\n")
+            emit_log("program_board", "stderr", message)
+            raise RuntimeError(message)
+
+
+def start_session(*, demo: Any, session_id: str, artifact_dir: Path, emit_log) -> dict[str, Any]:
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    emit_log("program_board", "stdout", "starting PL bitstream and PS app load")
+    stream_gpgpu_programming(root=demo.root, artifact_dir=artifact_dir, emit_log=emit_log)
+    port = _free_local_port()
+    command = [
+        sys.executable,
+        str(demo.root / "demo" / "interactive_3d.py"),
+        "--port",
+        DEFAULT_UART_PORT,
+        "--baud",
+        str(DEFAULT_BAUD),
+        "--imem",
+        str(demo.root / "programs" / "nbody-3d" / "nbody-3d_instructions.mem"),
+        "--skip-load-imem",
+        "--http-host",
+        "127.0.0.1",
+        "--http-port",
+        str(port),
+        "--no-browser",
+    ]
+    (artifact_dir / "demo-command.json").write_text(json.dumps(command, indent=2), encoding="utf-8")
+    stdout_log = (artifact_dir / "runtime-stdout.log").open("w", encoding="utf-8")
+    stderr_log = (artifact_dir / "runtime-stderr.log").open("w", encoding="utf-8")
+    emit_log("start_demo", "stdout", f"starting existing GPGPU demo on 127.0.0.1:{port}")
+    process = subprocess.Popen(command, cwd=demo.root, text=True, stdout=stdout_log, stderr=stderr_log)
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            raise RuntimeError(f"GPGPU interactive demo exited during startup with code {process.returncode}")
+        if _http_ready(port):
+            emit_log("start_demo", "stdout", "existing GPGPU demo is ready")
+            return {"demo_id": demo.id, "process": process, "port": port, "access_url": f"/api/sessions/{session_id}/demo/"}
+        time.sleep(0.1)
+    process.terminate()
+    raise RuntimeError("GPGPU interactive demo did not become ready")
+
+
+def stop_session(runtime: dict[str, Any]) -> None:
+    process = runtime.get("process")
+    if isinstance(process, subprocess.Popen):
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+
+
+def _free_local_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def _http_ready(port: int) -> bool:
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=0.25):
+            return True
+    except OSError:
+        return False
 
 
 def parse_nbody_csv(path: Path) -> list[dict[str, Any]]:

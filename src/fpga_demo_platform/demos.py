@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
@@ -97,6 +98,28 @@ def run_demo(demo: Demo, payload: dict[str, Any], artifact_dir: Path) -> dict[st
     if not isinstance(result, dict):
         raise TypeError(f"demo {demo.id!r} runner returned {type(result).__name__}, expected dict")
     return result
+
+
+def start_demo_session(demo: Demo, *, session_id: str, artifact_dir: Path, emit_log: Callable[[str, str, str], None]) -> dict[str, Any]:
+    module = load_demo_module(demo)
+    starter = getattr(module, "start_session", None)
+    if not callable(starter):
+        raise ValueError(f"demo {demo.id!r} does not define start_session(demo, session_id, artifact_dir, emit_log)")
+    result = starter(demo=demo, session_id=session_id, artifact_dir=artifact_dir, emit_log=emit_log)
+    if not isinstance(result, dict):
+        raise TypeError(f"demo {demo.id!r} start_session returned {type(result).__name__}, expected dict")
+    return result
+
+
+def stop_demo_session(demo: Demo, runtime: dict[str, Any]) -> None:
+    module = load_demo_module(demo)
+    stopper = getattr(module, "stop_session", None)
+    if callable(stopper):
+        stopper(runtime)
+        return
+    process = runtime.get("process")
+    if isinstance(process, subprocess.Popen):
+        process.terminate()
 
 
 def load_demo_module(demo: Demo) -> ModuleType:

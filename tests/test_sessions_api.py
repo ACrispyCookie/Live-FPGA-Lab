@@ -9,6 +9,11 @@ from fpga_demo_platform.thermal import ThermalStatus
 from tests.fakes import FakeBoardWiper, FakeThermalGuard, SequenceThermalGuard
 
 
+def fake_start_demo_session(demo, session_id, artifact_dir, emit_log):
+    emit_log("program_board", "stdout", "fpga-demo: programmed PL")
+    return {"demo_id": demo.id, "port": 8765, "access_url": f"/api/sessions/{session_id}/demo/"}
+
+
 def make_client(tmp_path, *, thermal_guard=None, board_wiper=None):
     manager = SessionManager(
         tmp_path / "sessions.sqlite3",
@@ -36,7 +41,8 @@ def test_create_session_grants_only_one_active_lease(tmp_path):
 
     assert first.status_code == 201
     assert second.status_code == 201
-    assert first.json()["state"] == "active"
+    assert first.json()["state"] == "starting"
+    assert first.json()["owner_token"]
     assert first.json()["queue_position"] is None
     assert first.json()["lease"]["remaining_seconds"] > 0
     assert second.json()["state"] == "queued"
@@ -53,12 +59,12 @@ def test_release_active_session_grants_next_waiting_session(tmp_path):
     first = client.post("/api/sessions", json={"project_id": "ece338-gpgpu-nbody-3d"}, headers={"x-forwarded-for": "198.51.100.1"}).json()
     second = client.post("/api/sessions", json={"project_id": "ece338-gpgpu-nbody-3d"}, headers={"x-forwarded-for": "198.51.100.2"}).json()
 
-    released = client.delete(f"/api/sessions/{first['id']}")
+    released = client.delete(f"/api/sessions/{first['id']}", headers={"x-session-token": first["owner_token"]})
 
     assert released.status_code == 200
     assert released.json()["state"] == "released"
     promoted = client.get(f"/api/sessions/{second['id']}").json()
-    assert promoted["state"] == "active"
+    assert promoted["state"] == "starting"
     assert promoted["queue_position"] is None
     assert promoted["lease"]["remaining_seconds"] > 0
 
@@ -90,6 +96,26 @@ def test_session_request_rejects_unknown_fields_and_project_ids(tmp_path):
     assert client.post("/api/sessions", json={"project_id": "missing"}).status_code == 404
     response = client.post("/api/sessions", json={"project_id": "ece338-gpgpu-nbody-3d", "uart_port": "/dev/ttyUSB0"})
     assert response.status_code == 422
+
+
+def test_only_owner_can_start_extend_and_release_session(tmp_path, monkeypatch):
+    import fpga_demo_platform.sessions as sessions_module
+
+    monkeypatch.setattr(sessions_module, "start_demo_session", fake_start_demo_session)
+    client, _ = make_client(tmp_path)
+    session = client.post("/api/sessions", json={"project_id": "ece338-gpgpu-nbody-3d"}).json()
+
+    assert client.post(f"/api/sessions/{session['id']}/start").status_code == 403
+    assert client.post(f"/api/sessions/{session['id']}/start", headers={"x-session-token": "wrong"}).status_code == 403
+
+    started = client.post(f"/api/sessions/{session['id']}/start", headers={"x-session-token": session["owner_token"]})
+    assert started.status_code == 200
+    assert started.json()["state"] == "active"
+    assert started.json()["access"]["url"] == f"/api/sessions/{session['id']}/demo/"
+
+    assert client.post(f"/api/sessions/{session['id']}/extend").status_code == 403
+    assert client.delete(f"/api/sessions/{session['id']}").status_code == 403
+    assert client.delete(f"/api/sessions/{session['id']}", headers={"x-session-token": session["owner_token"]}).status_code == 200
 
 
 def test_session_artifacts_are_manifest_scoped(tmp_path):
@@ -200,7 +226,7 @@ def test_board_monitor_promotes_queued_session_after_thermal_recovery(tmp_path):
     manager.check_board_safety()
 
     assert manager.get(first.id).state == "failed"
-    assert manager.get(second.id).state == "active"
+    assert manager.get(second.id).state == "starting"
 
 
 def test_release_does_not_promote_queued_session_when_cached_thermal_is_unsafe(tmp_path):

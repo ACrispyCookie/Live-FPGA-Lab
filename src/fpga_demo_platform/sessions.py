@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import queue
+import secrets
 import shutil
 import sqlite3
 import threading
@@ -13,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
-from fpga_demo_platform.demos import get_demo, get_project
+from fpga_demo_platform.demos import get_demo, get_project, start_demo_session, stop_demo_session
 from fpga_demo_platform.thermal import BoardWiper, HardwareUnavailable, ThermalGuard
 
 SessionState = Literal["queued", "starting", "active", "releasing", "released", "expired", "cancelled", "failed"]
@@ -48,6 +49,7 @@ class Session:
     released_at: str | None
     error: str | None
     artifact_dir: str | None
+    owner_token: str | None = None
 
 
 @dataclass(frozen=True)
@@ -104,6 +106,8 @@ class SessionManager:
         self.thermal_guard = thermal_guard or ThermalGuard()
         self.event_bus = event_bus or EventBus()
         self.board_wiper = board_wiper or BoardWiper()
+        self._runtimes: dict[str, dict[str, Any]] = {}
+        self._expiry_warned: dict[str, set[int]] = {}
         self._board_unavailable = False
         self._monitor_stop = threading.Event()
         self._monitor_thread: threading.Thread | None = None
@@ -150,12 +154,15 @@ class SessionManager:
                     lease_expires_at TEXT,
                     released_at TEXT,
                     error TEXT,
-                    artifact_dir TEXT
+                    artifact_dir TEXT,
+                    owner_token TEXT
                 )
             """)
             columns = {row["name"] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()}
             if "project_id" not in columns:
                 conn.execute("ALTER TABLE sessions ADD COLUMN project_id TEXT")
+            if "owner_token" not in columns:
+                conn.execute("ALTER TABLE sessions ADD COLUMN owner_token TEXT")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS artifacts (
                     session_id TEXT NOT NULL,
@@ -181,6 +188,7 @@ class SessionManager:
         except HardwareUnavailable:
             raise
         session_id = f"sess_{uuid.uuid4().hex[:16]}"
+        owner_token = secrets.token_urlsafe(32)
         now = _now()
         artifact_dir = self.artifacts_dir / session_id
         artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -194,15 +202,15 @@ class SessionManager:
                 if existing is not None:
                     raise SessionLimitExceeded("requester already has an active or queued FPGA session")
             active = conn.execute("SELECT id FROM sessions WHERE state IN ('starting', 'active', 'releasing') LIMIT 1").fetchone()
-            state = "queued" if active else "active"
-            starts = now if state == "active" else None
-            expires = _iso(datetime.now(UTC) + timedelta(seconds=DEFAULT_LEASE_SECONDS)) if state == "active" else None
+            state = "queued" if active else "starting"
+            starts = now if state == "starting" else None
+            expires = _iso(datetime.now(UTC) + timedelta(seconds=DEFAULT_LEASE_SECONDS)) if state == "starting" else None
             conn.execute(
                 """
-                INSERT INTO sessions (id, project_id, demo_id, state, requester, created_at, lease_started_at, lease_expires_at, artifact_dir)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO sessions (id, project_id, demo_id, state, requester, created_at, lease_started_at, lease_expires_at, artifact_dir, owner_token)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (session_id, project_id, demo_id, state, requester, now, starts, expires, str(artifact_dir)),
+                (session_id, project_id, demo_id, state, requester, now, starts, expires, str(artifact_dir), owner_token),
             )
         session = self.get(session_id)
         self.event_bus.publish("session.created", {"session": session_to_dict(session)})
@@ -227,7 +235,9 @@ class SessionManager:
         return [self._session_from_row(row) for row in rows]
 
     def release(self, session_id: str) -> Session:
+        self._cleanup_runtime(session_id)
         now = _now()
+        should_wipe = False
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
@@ -239,15 +249,70 @@ class SessionManager:
                 new_state = row["state"]
             else:
                 new_state = "released"
+                should_wipe = True
             conn.execute("UPDATE sessions SET state = ?, released_at = ? WHERE id = ?", (new_state, now, session_id))
             if row["state"] in {"active", "starting", "releasing"} and self.thermal_guard.snapshot().available:
                 self._promote_next_locked(conn)
         session = self.get(session_id)
+        if should_wipe:
+            wipe_result = self.board_wiper.wipe()
+            self.event_bus.publish("safety.wipe", {"session_id": session_id, "reason": "session_released", "wipe": wipe_result})
         self.event_bus.publish("session.finished", {"session": session_to_dict(session)})
         self.event_bus.publish("queue.changed", {"queue": self.queue_summary()})
         self.event_bus.publish("board.status", self.board_status())
         self.purge_history()
         return session
+
+    def require_owner(self, session_id: str, owner_token: str | None) -> Session:
+        session = self.get(session_id)
+        if not owner_token or not secrets.compare_digest(owner_token, session.owner_token or ""):
+            raise PermissionError("session owner token is required")
+        return session
+
+    def start_owned_session(self, session_id: str, owner_token: str | None) -> Session:
+        session = self.require_owner(session_id, owner_token)
+        if session.state != "starting":
+            raise ValueError(f"session must be starting before demo startup, not {session.state}")
+        demo = get_demo(session.demo_id)
+        artifact_dir = Path(session.artifact_dir or self.artifacts_dir / session_id)
+
+        def emit_log(phase: str, stream: str, message: str) -> None:
+            self.event_bus.publish("session.log", {"session_id": session_id, "phase": phase, "stream": stream, "message": message})
+
+        self.event_bus.publish("session.starting", {"session": session_to_dict(session)})
+        try:
+            runtime = start_demo_session(demo, session_id=session_id, artifact_dir=artifact_dir, emit_log=emit_log)
+            self._runtimes[session_id] = runtime
+            access_url = str(runtime.get("access_url") or f"/api/sessions/{session_id}/demo/")
+            with self._connect() as conn:
+                conn.execute("UPDATE sessions SET state = 'active' WHERE id = ? AND state = 'starting'", (session_id,))
+            ready = self.get(session_id)
+            self.event_bus.publish("session.ready", {"session": session_to_dict(ready), "access": {"url": access_url, "token_required": True}})
+            self.event_bus.publish("session.updated", {"session": session_to_dict(ready)})
+            return ready
+        except Exception as exc:
+            self._cleanup_runtime(session_id)
+            with self._connect() as conn:
+                conn.execute("UPDATE sessions SET state = 'failed', released_at = ?, error = ? WHERE id = ?", (_now(), str(exc), session_id))
+            failed = self.get(session_id)
+            self.event_bus.publish("session.failed", {"session": session_to_dict(failed), "error": str(exc)})
+            self.event_bus.publish("session.finished", {"session": session_to_dict(failed)})
+            raise
+
+    def runtime_for_session(self, session_id: str, owner_token: str | None) -> dict[str, Any]:
+        session = self.require_owner(session_id, owner_token)
+        if session.state != "active" or session_id not in self._runtimes:
+            raise ValueError("session demo is not active")
+        return self._runtimes[session_id]
+
+    def _cleanup_runtime(self, session_id: str) -> None:
+        runtime = self._runtimes.pop(session_id, None)
+        if not runtime:
+            return
+        try:
+            stop_demo_session(get_demo(str(runtime.get("demo_id") or "")), runtime)
+        except Exception as exc:
+            self.event_bus.publish("session.log", {"session_id": session_id, "phase": "cleanup", "stream": "stderr", "message": str(exc)})
 
     def extend(self, session_id: str) -> Session:
         with self._connect() as conn:
@@ -355,8 +420,43 @@ class SessionManager:
         }
 
     def status_snapshot(self) -> dict[str, Any]:
+        self.check_session_policy()
         state = self.board_status()
         return {"api": {"status": "ok"}, **state, "sessions": {"active_session_id": state["board"]["locked_by_session_id"], "queued": self.queue_summary()["queued"]}}
+
+    def check_session_policy(self) -> None:
+        now = datetime.now(UTC)
+        with self._connect() as conn:
+            active = conn.execute("SELECT * FROM sessions WHERE state = 'active' ORDER BY created_at ASC LIMIT 1").fetchone()
+            queued = conn.execute("SELECT COUNT(*) AS n FROM sessions WHERE state = 'queued'").fetchone()["n"]
+            if active is None or not active["lease_expires_at"] or not active["lease_started_at"]:
+                return
+            session_id = active["id"]
+            expires = datetime.fromisoformat(active["lease_expires_at"])
+            starts = datetime.fromisoformat(active["lease_started_at"])
+            remaining = int((expires - now).total_seconds())
+            max_expiry = starts + timedelta(seconds=DEFAULT_MAX_TOTAL_SECONDS)
+            if remaining <= 60 and queued == 0 and expires < max_expiry:
+                new_expiry = min(expires + timedelta(seconds=DEFAULT_EXTENSION_SECONDS), max_expiry)
+                conn.execute("UPDATE sessions SET lease_expires_at = ? WHERE id = ?", (_iso(new_expiry), session_id))
+                session = self.get(session_id)
+                self.event_bus.publish("session.updated", {"session": session_to_dict(session), "extension": "automatic"})
+                self._expiry_warned.pop(session_id, None)
+                return
+            if remaining <= 0:
+                self._cleanup_runtime(session_id)
+                conn.execute("UPDATE sessions SET state = 'expired', released_at = ? WHERE id = ?", (_now(), session_id))
+                self.board_wiper.wipe()
+                self._promote_next_locked(conn)
+                session = self.get(session_id)
+                self.event_bus.publish("session.finished", {"session": session_to_dict(session)})
+                self.event_bus.publish("queue.changed", {"queue": self.queue_summary()})
+                return
+            for threshold in (60, 30, 10):
+                if remaining <= threshold and threshold not in self._expiry_warned.setdefault(session_id, set()):
+                    self._expiry_warned[session_id].add(threshold)
+                    reason = "another_user_waiting" if queued else "maximum_duration_reached"
+                    self.event_bus.publish("session.expiring", {"session_id": session_id, "remaining_seconds": remaining, "reason": reason})
 
     def artifacts_for_session(self, session_id: str) -> list[dict[str, Any]]:
         with self._connect() as conn:
@@ -415,7 +515,7 @@ class SessionManager:
             return False
         now_dt = datetime.now(UTC)
         conn.execute(
-            "UPDATE sessions SET state = 'active', lease_started_at = ?, lease_expires_at = ? WHERE id = ?",
+            "UPDATE sessions SET state = 'starting', lease_started_at = ?, lease_expires_at = ? WHERE id = ?",
             (_iso(now_dt), _iso(now_dt + timedelta(seconds=DEFAULT_LEASE_SECONDS)), row["id"]),
         )
         return True
@@ -451,26 +551,30 @@ class SessionManager:
             released_at=row["released_at"],
             error=row["error"],
             artifact_dir=row["artifact_dir"],
+            owner_token=row["owner_token"],
         )
 
 
-def session_to_dict(session: Session, *, artifacts: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def session_to_dict(session: Session, *, artifacts: list[dict[str, Any]] | None = None, include_owner_token: bool = False) -> dict[str, Any]:
     lease = None
     if session.lease_started_at and session.lease_expires_at:
         remaining = max(0, int((datetime.fromisoformat(session.lease_expires_at) - datetime.now(UTC)).total_seconds()))
         lease = {"starts_at": session.lease_started_at, "expires_at": session.lease_expires_at, "remaining_seconds": remaining, "duration_seconds": DEFAULT_LEASE_SECONDS}
-    return {
+    data = {
         "id": session.id,
         "project_id": session.project_id,
         "state": session.state,
         "queue_position": session.queue_position,
         "lease": lease,
-        "access": {"url": f"/projects/{session.project_id}/session/{session.id}/", "token_required": True} if session.state == "active" else None,
+        "access": {"url": f"/api/sessions/{session.id}/demo/", "token_required": True} if session.state == "active" else None,
         "created_at": session.created_at,
         "released_at": session.released_at,
         "artifacts": artifacts or [],
         "error": session.error,
     }
+    if include_owner_token:
+        data["owner_token"] = session.owner_token
+    return data
 
 
 def artifact_to_dict(session_id: str, artifact: Artifact) -> dict[str, Any]:

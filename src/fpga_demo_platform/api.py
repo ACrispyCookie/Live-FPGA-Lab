@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import os
 import queue
+import urllib.error
+import urllib.parse
+import urllib.request
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict
 
 from fpga_demo_platform.demos import list_projects, project_to_dict
@@ -71,7 +74,7 @@ def create_app(*, session_manager: SessionManager) -> FastAPI:
             raise HTTPException(status_code=429, detail={"error": {"code": "session_limit", "message": str(exc)}}) from exc
         except ValueError as exc:
             raise HTTPException(status_code=422, detail={"error": {"code": "invalid_session_request", "message": str(exc)}}) from exc
-        return session_to_dict(session, artifacts=session_manager.artifacts_for_session(session.id))
+        return session_to_dict(session, artifacts=session_manager.artifacts_for_session(session.id), include_owner_token=True)
 
     @app.get("/api/sessions")
     def list_sessions(limit: int = 20, state: str | None = None) -> list[dict[str, Any]]:
@@ -87,22 +90,57 @@ def create_app(*, session_manager: SessionManager) -> FastAPI:
         return session_to_dict(session, artifacts=session_manager.artifacts_for_session(session.id))
 
     @app.delete("/api/sessions/{session_id}")
-    def release_session(session_id: str) -> dict[str, Any]:
+    def release_session(session_id: str, request: Request) -> dict[str, Any]:
         try:
+            session_manager.require_owner(session_id, _owner_token(request))
             session = session_manager.release(session_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail={"error": {"code": "unknown_session", "message": str(exc)}}) from exc
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail={"error": {"code": "not_session_owner", "message": str(exc)}}) from exc
+        return session_to_dict(session, artifacts=session_manager.artifacts_for_session(session.id))
+
+    @app.post("/api/sessions/{session_id}/start")
+    def start_session(session_id: str, request: Request) -> dict[str, Any]:
+        try:
+            session = session_manager.start_owned_session(session_id, _owner_token(request))
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail={"error": {"code": "unknown_session", "message": str(exc)}}) from exc
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail={"error": {"code": "not_session_owner", "message": str(exc)}}) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail={"error": {"code": "session_not_starting", "message": str(exc)}}) from exc
         return session_to_dict(session, artifacts=session_manager.artifacts_for_session(session.id))
 
     @app.post("/api/sessions/{session_id}/extend")
-    def extend_session(session_id: str) -> dict[str, Any]:
+    def extend_session(session_id: str, request: Request) -> dict[str, Any]:
         try:
+            session_manager.require_owner(session_id, _owner_token(request))
             session = session_manager.extend(session_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail={"error": {"code": "unknown_session", "message": str(exc)}}) from exc
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail={"error": {"code": "not_session_owner", "message": str(exc)}}) from exc
         except ValueError as exc:
             raise HTTPException(status_code=409, detail={"error": {"code": "extension_denied", "message": str(exc)}}) from exc
         return session_to_dict(session, artifacts=session_manager.artifacts_for_session(session.id))
+
+    @app.api_route("/api/sessions/{session_id}/demo/", methods=["GET", "POST"])
+    @app.api_route("/api/sessions/{session_id}/demo/{demo_path:path}", methods=["GET", "POST"])
+    async def proxy_demo(session_id: str, request: Request, demo_path: str = ""):
+        try:
+            runtime = session_manager.runtime_for_session(session_id, _owner_token(request))
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail={"error": {"code": "unknown_session", "message": str(exc)}}) from exc
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail={"error": {"code": "not_session_owner", "message": str(exc)}}) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail={"error": {"code": "demo_not_active", "message": str(exc)}}) from exc
+        body = await request.body() if request.method.upper() == "POST" else None
+        response = _proxy_upstream(request, _demo_upstream_url(runtime, demo_path, request), body=body)
+        if request.query_params.get("token"):
+            response.set_cookie(_session_cookie_name(session_id), request.query_params["token"], httponly=True, samesite="lax", path=f"/api/sessions/{session_id}/demo")
+        return response
 
     @app.get("/api/sessions/{session_id}/artifacts/{artifact_name}")
     def get_artifact(session_id: str, artifact_name: str) -> FileResponse:
@@ -158,6 +196,7 @@ def create_app(*, session_manager: SessionManager) -> FastAPI:
                 elif msg_type == "ping":
                     await websocket.send_json({"type": "pong", "nonce": data.get("nonce")})
                 elif msg_type == "__tick":
+                    session_manager.check_session_policy()
                     continue
                 else:
                     await websocket.send_json({"type": "error", "code": "bad_message", "message": "Unknown message type"})
@@ -193,6 +232,9 @@ def _should_send_event(event_type: str, payload: dict[str, Any], channels: set[s
         return "board" in channels
     if event_type == "queue.changed":
         return "queue" in channels
+    if event_type.startswith("safety."):
+        session_id = payload.get("session_id") or (payload.get("session") or {}).get("id")
+        return "board" in channels or session_id in sessions
     if event_type.startswith("session.") or event_type == "artifact.created":
         session = payload.get("session") or {}
         session_id = payload.get("session_id") or session.get("id")
@@ -217,6 +259,48 @@ def _requester(request: Request) -> str | None:
     if forwarded:
         return forwarded.split(",", 1)[0].strip()
     return request.client.host if request.client else None
+
+
+def _owner_token(request: Request) -> str | None:
+    session_id = request.path_params.get("session_id")
+    auth = request.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        return auth.split(" ", 1)[1].strip()
+    header = request.headers.get("x-session-token")
+    if header:
+        return header.strip()
+    query = request.query_params.get("token")
+    if query:
+        return query.strip()
+    if isinstance(session_id, str):
+        cookie = request.cookies.get(_session_cookie_name(session_id))
+        if cookie:
+            return cookie.strip()
+    return None
+
+
+def _session_cookie_name(session_id: str) -> str:
+    return f"fpga_session_{session_id}"
+
+
+def _demo_upstream_url(runtime: dict[str, Any], demo_path: str, request: Request) -> str:
+    path = "/" + demo_path.lstrip("/")
+    query_items = [(key, value) for key, value in request.query_params.multi_items() if key != "token"]
+    query = urllib.parse.urlencode(query_items)
+    return f"http://127.0.0.1:{int(runtime['port'])}{path}" + (f"?{query}" if query else "")
+
+
+def _proxy_upstream(request: Request, url: str, *, body: bytes | None = None):
+    headers = {"content-type": request.headers.get("content-type", "application/octet-stream")}
+    upstream_request = urllib.request.Request(url, data=body, headers=headers, method=request.method.upper())
+    try:
+        upstream = urllib.request.urlopen(upstream_request, timeout=None if url.endswith("/events") else 15)
+    except urllib.error.HTTPError as exc:
+        return Response(exc.read(), status_code=exc.code, media_type=exc.headers.get("content-type"))
+    content_type = upstream.headers.get("content-type", "application/octet-stream")
+    if "text/event-stream" in content_type:
+        return StreamingResponse(upstream, media_type=content_type)
+    return Response(upstream.read(), status_code=upstream.status, media_type=content_type)
 
 
 def _now() -> str:
