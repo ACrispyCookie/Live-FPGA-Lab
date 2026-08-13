@@ -6,14 +6,15 @@ from fastapi.testclient import TestClient
 from fpga_demo_platform.api import create_app
 from fpga_demo_platform.sessions import SessionManager
 from fpga_demo_platform.thermal import ThermalStatus
-from tests.fakes import FakeThermalGuard, SequenceThermalGuard
+from tests.fakes import FakeBoardWiper, FakeThermalGuard, SequenceThermalGuard
 
 
-def make_client(tmp_path, *, thermal_guard=None):
+def make_client(tmp_path, *, thermal_guard=None, board_wiper=None):
     manager = SessionManager(
         tmp_path / "sessions.sqlite3",
-        artifacts_dir=tmp_path / "sessions",
+        tmp_path / "sessions",
         thermal_guard=thermal_guard or FakeThermalGuard(),
+        board_wiper=board_wiper,
     )
     return TestClient(create_app(session_manager=manager)), manager
 
@@ -127,7 +128,8 @@ def test_board_monitor_marks_active_session_failed_when_thermal_becomes_unsafe(t
         ThermalStatus(True, 45.0, 75.0, None, "2026-08-12T00:00:00+00:00"),
         ThermalStatus(False, 82.0, 75.0, "too hot", "2026-08-12T00:00:10+00:00"),
     ])
-    _, manager = make_client(tmp_path, thermal_guard=guard)
+    wiper = FakeBoardWiper()
+    _, manager = make_client(tmp_path, thermal_guard=guard, board_wiper=wiper)
     session = manager.request_session("ece338-gpgpu-nbody-3d", requester="user-a")
 
     status = manager.check_board_safety()
@@ -136,6 +138,17 @@ def test_board_monitor_marks_active_session_failed_when_thermal_becomes_unsafe(t
     assert status["thermal"]["available"] is False
     assert failed.state == "failed"
     assert failed.error == "thermal lockout: too hot"
+    assert wiper.calls == 1
+
+
+def test_board_monitor_does_not_wipe_board_when_thermal_is_safe(tmp_path):
+    wiper = FakeBoardWiper()
+    _, manager = make_client(tmp_path, thermal_guard=FakeThermalGuard(), board_wiper=wiper)
+    manager.request_session("ece338-gpgpu-nbody-3d", requester="user-a")
+
+    manager.check_board_safety()
+
+    assert wiper.calls == 0
 
 
 def test_board_monitor_keeps_queued_sessions_queued_during_thermal_lockout(tmp_path):

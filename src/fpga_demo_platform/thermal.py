@@ -12,6 +12,7 @@ from pathlib import Path
 
 DEFAULT_MAX_TEMPERATURE_C = float(os.environ.get("FPGA_DEMO_MAX_TEMPERATURE_C", "75.0"))
 DEFAULT_VIVADO_SETTINGS = Path(os.environ.get("FPGA_DEMO_VIVADO_SETTINGS", "/home/njason/Xilinx/2025.2/Vivado/settings64.sh"))
+DEFAULT_XSDB = Path(os.environ.get("FPGA_DEMO_XSDB", "xsdb"))
 DEFAULT_CACHE_SECONDS = float(os.environ.get("FPGA_DEMO_TEMPERATURE_CACHE_SECONDS", "10"))
 DEFAULT_READER_TIMEOUT_SECONDS = float(os.environ.get("FPGA_DEMO_TEMPERATURE_READ_TIMEOUT_SECONDS", "20"))
 
@@ -169,6 +170,36 @@ class PersistentVivadoThermalReader:
         return {"error": payload.get("error") or "Vivado temperature output did not include a thermal reading"}
 
 
+class BoardWiper:
+    def __init__(self, *, vivado_settings: Path = DEFAULT_VIVADO_SETTINGS, xsdb: Path = DEFAULT_XSDB, timeout_seconds: float = 60):
+        self.vivado_settings = Path(vivado_settings)
+        self.xsdb = Path(xsdb)
+        self.timeout_seconds = timeout_seconds
+
+    def wipe(self) -> dict[str, object]:
+        if not self.vivado_settings.exists():
+            return {"ok": False, "error": f"Vivado settings not found at {self.vivado_settings}"}
+        script_path = _write_board_wipe_xsdb_script()
+        try:
+            completed = subprocess.run(
+                ["bash", "-lc", f"source {self.vivado_settings} >/dev/null 2>&1 && {self.xsdb} {script_path}"],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=self.timeout_seconds,
+                check=False,
+            )
+        finally:
+            script_path.unlink(missing_ok=True)
+        ok = completed.returncode == 0 and "FPGA_WIPE_DONE" in completed.stdout
+        return {
+            "ok": ok,
+            "stdout": completed.stdout,
+            "stderr": completed.stderr,
+            "error": None if ok else (_last_nonempty_line(completed.stderr) or _last_nonempty_line(completed.stdout) or "board wipe failed"),
+        }
+
+
 class HardwareUnavailable(RuntimeError):
     def __init__(self, message: str, *, status: ThermalStatus):
         super().__init__(message)
@@ -200,6 +231,29 @@ def _write_oneshot_tcl_script() -> Path:
 
 def _write_persistent_tcl_script() -> Path:
     return _write_temp_tcl_script(_TCL_SETUP + "\nputs {FPGA_THERMAL_READY}\nflush stdout\nwhile {[gets stdin line] >= 0} {\n    if {$line eq {read}} { read_temperature }\n    if {$line eq {quit}} { exit }\n}\n")
+
+
+def _write_board_wipe_xsdb_script() -> Path:
+    return _write_temp_tcl_script(r"""
+connect
+catch {
+    targets -set -filter {name =~ "ARM Cortex-A9 MPCore #0"}
+    stop
+    rst -processor
+    stop
+}
+targets -set -filter {name =~ "ARM Cortex-A9 MPCore #0"}
+set ctrl [mrd -value 0xF8007000]
+mwr 0xF8007000 [expr {$ctrl & ~(1 << 30)}]
+after 100
+mwr 0xF8007000 [expr {$ctrl | (1 << 30)}]
+catch {
+    targets -set -filter {name =~ "xc7z020"}
+    puts [fpga -state]
+}
+puts {FPGA_WIPE_DONE}
+exit
+""".lstrip())
 
 
 def _write_temp_tcl_script(content: str) -> Path:

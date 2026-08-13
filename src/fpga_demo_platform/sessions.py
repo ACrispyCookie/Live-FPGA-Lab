@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fpga_demo_platform.demos import get_demo, get_project
-from fpga_demo_platform.thermal import HardwareUnavailable, ThermalGuard
+from fpga_demo_platform.thermal import BoardWiper, HardwareUnavailable, ThermalGuard
 
 SessionState = Literal["queued", "starting", "active", "releasing", "released", "expired", "cancelled", "failed"]
 TERMINAL_STATES = {"released", "expired", "cancelled", "failed"}
@@ -98,11 +98,12 @@ class EventBus:
 
 
 class SessionManager:
-    def __init__(self, db_path: str | Path, artifacts_dir: str | Path, *, thermal_guard: ThermalGuard | None = None, event_bus: EventBus | None = None):
+    def __init__(self, db_path: str | Path, artifacts_dir: str | Path, *, thermal_guard: ThermalGuard | None = None, event_bus: EventBus | None = None, board_wiper: BoardWiper | None = None):
         self.db_path = Path(db_path)
         self.artifacts_dir = Path(artifacts_dir)
         self.thermal_guard = thermal_guard or ThermalGuard()
         self.event_bus = event_bus or EventBus()
+        self.board_wiper = board_wiper or BoardWiper()
         self._monitor_stop = threading.Event()
         self._monitor_thread: threading.Thread | None = None
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -292,27 +293,33 @@ class SessionManager:
         thermal_status = self.thermal_guard.status(refresh=True)
         failed_session_id = None
         failed_session = None
+        wipe_result = None
         promoted = False
         now = _now()
         with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            active = conn.execute("SELECT * FROM sessions WHERE state IN ('starting', 'active', 'releasing') ORDER BY created_at ASC LIMIT 1").fetchone()
+            active = conn.execute("SELECT id FROM sessions WHERE state IN ('starting', 'active', 'releasing') ORDER BY created_at ASC LIMIT 1").fetchone()
             if not thermal_status.available and active is not None:
                 failed_session_id = active["id"]
-                reason = thermal_status.reason or "thermal status unavailable"
+        if failed_session_id is not None:
+            reason = thermal_status.reason or "thermal status unavailable"
+            wipe_result = self.board_wiper.wipe()
+            with self._connect() as conn:
                 conn.execute(
-                    "UPDATE sessions SET state = 'failed', released_at = ?, error = ? WHERE id = ?",
+                    "UPDATE sessions SET state = 'failed', released_at = ?, error = ? WHERE id = ? AND state IN ('starting', 'active', 'releasing')",
                     (now, f"thermal lockout: {reason}", failed_session_id),
                 )
-            elif thermal_status.available and active is None:
-                promoted = self._promote_next_locked(conn)
-        if failed_session_id is not None:
             failed_session = self.get(failed_session_id)
-            self.event_bus.publish("safety.lockout", {"thermal": thermal_status.to_dict(), "session": session_to_dict(failed_session)})
+            self.event_bus.publish("safety.lockout", {"thermal": thermal_status.to_dict(), "session": session_to_dict(failed_session), "wipe": wipe_result})
             self.event_bus.publish("session.finished", {"session": session_to_dict(failed_session)})
             self.event_bus.publish("queue.changed", {"queue": self.queue_summary()})
-        elif promoted:
-            self.event_bus.publish("queue.changed", {"queue": self.queue_summary()})
+        elif thermal_status.available:
+            with self._connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                active = conn.execute("SELECT id FROM sessions WHERE state IN ('starting', 'active', 'releasing') ORDER BY created_at ASC LIMIT 1").fetchone()
+                if active is None:
+                    promoted = self._promote_next_locked(conn)
+            if promoted:
+                self.event_bus.publish("queue.changed", {"queue": self.queue_summary()})
         status = self.board_status(thermal_status=thermal_status)
         self.event_bus.publish("board.status", status)
         return status

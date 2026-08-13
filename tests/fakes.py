@@ -55,3 +55,11 @@ class SequenceThermalGuard:
 
             raise HardwareUnavailable(status.reason or "unavailable", status=status)
         return status
+
+
+class FakeBoardWiper:
+    def __init__(self):
+        self.calls = 0
+
+    def wipe(self):
+        self.calls += 1
