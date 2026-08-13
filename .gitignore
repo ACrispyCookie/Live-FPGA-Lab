@@ -1,5 +1,6 @@
 state/
 runs/
+.hermes/
 __pycache__/
 .pytest_cache/
 .venv/

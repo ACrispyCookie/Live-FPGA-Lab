@@ -1,22 +1,22 @@
 from fastapi.testclient import TestClient
 
 from fpga_demo_platform.api import create_app
-from fpga_demo_platform.queue import JobQueue
+from fpga_demo_platform.sessions import SessionManager
 from fpga_demo_platform.web import create_web_app
-from tests.fakes import FakeThermalGuard
+from tests.fakes import BlockingThermalGuard, FakeThermalGuard
 
 
-def successful_runner(demo_id, payload, artifact_dir):
-    return {"demo": demo_id, "adapter": "test-runner", "input": payload}
+def make_client(tmp_path, *, thermal_guard=None):
+    manager = SessionManager(
+        tmp_path / "sessions.sqlite3",
+        artifacts_dir=tmp_path / "sessions",
+        thermal_guard=thermal_guard or FakeThermalGuard(),
+    )
+    return TestClient(create_app(session_manager=manager))
 
 
 def test_api_is_json_only_and_does_not_serve_webpage(tmp_path):
-    queue = JobQueue(
-        tmp_path / "jobs.sqlite3",
-        artifacts_dir=tmp_path / "runs",
-        thermal_guard=FakeThermalGuard(),
-    )
-    client = TestClient(create_app(queue=queue))
+    client = make_client(tmp_path)
 
     response = client.get("/")
 
@@ -39,101 +39,53 @@ def test_static_web_app_embeds_api_base_without_api_routes():
     assert client.get("/api/demos").status_code == 404
 
 
-def test_job_events_stream_status_changes(tmp_path):
-    queue = JobQueue(
-        tmp_path / "jobs.sqlite3",
-        artifacts_dir=tmp_path / "runs",
-        runner=successful_runner,
-        thermal_guard=FakeThermalGuard(),
-    )
-    client = TestClient(create_app(queue=queue))
-    submitted = client.post("/api/demos/gpgpu-nbody/run", json={"input": {}}).json()
-    client.post("/api/worker/run-next")
+def test_api_lists_real_projects_with_runnable_capability(tmp_path):
+    client = make_client(tmp_path)
 
-    with client.stream("GET", f"/api/jobs/{submitted['id']}/events") as response:
-        assert response.status_code == 200
-        first_chunk = next(response.iter_text())
+    projects = client.get("/api/projects").json()
+    assert {project["source_ref"] for project in projects} >= {"programs/nbody-3d", "programs/mandelbrot", "programs/sobel"}
+    assert all("/home/" not in str(project) for project in projects)
+    assert client.get("/api/demos").status_code == 404
 
-    assert "event: job" in first_chunk
-    assert '"status": "succeeded"' in first_chunk
+    runnable = [project for project in projects if project["runnable"]]
+    assert [project["id"] for project in runnable] == ["ece338-gpgpu-nbody-3d"]
+    assert runnable[0]["lease"]["duration_seconds"] > 0
 
 
-def test_api_lists_gpgpu_demo_and_runs_job(tmp_path):
-    queue = JobQueue(
-        tmp_path / "jobs.sqlite3",
-        artifacts_dir=tmp_path / "runs",
-        runner=successful_runner,
-        thermal_guard=FakeThermalGuard(),
-    )
-    client = TestClient(create_app(queue=queue))
-
-    demos = client.get("/api/demos").json()
-    assert demos[0] == {
-        "id": "gpgpu-nbody",
-        "name": "GPGPU n-body simulator",
-        "kind": "zynq-ps-pl",
-        "board": "HelloFPGA ZYNQ7000",
-        "summary": "Interactive n-body simulation running through the ZYNQ PS/PL GPGPU demo stack.",
-        "available": True,
-        "placeholder": False,
-    }
-    assert {demo["id"] for demo in demos[1:]} == {"matrix-accelerator", "riscv-core", "signal-lab"}
-    assert all(demo["placeholder"] and not demo["available"] for demo in demos[1:])
-
-    submitted = client.post("/api/demos/gpgpu-nbody/run", json={"input": {"steps_per_frame": 4}})
-    assert submitted.status_code == 201
-    job_id = submitted.json()["id"]
-
-    worker_result = client.post("/api/worker/run-next")
-    assert worker_result.status_code == 200
-    assert worker_result.json()["status"] == "succeeded"
-
-    fetched = client.get(f"/api/jobs/{job_id}")
-    assert fetched.status_code == 200
-    assert fetched.json()["result"]["adapter"] == "test-runner"
-
-
-def test_api_rejects_invalid_input(tmp_path):
-    queue = JobQueue(
-        tmp_path / "jobs.sqlite3",
-        artifacts_dir=tmp_path / "runs",
-        thermal_guard=FakeThermalGuard(),
-    )
-    client = TestClient(create_app(queue=queue))
-
-    response = client.post("/api/demos/gpgpu-nbody/run", json={"input": {"steps_per_frame": 0}})
-
-    assert response.status_code == 422
-    assert "steps_per_frame" in response.text
-
-
-def test_status_exposes_thermal_guard_and_recent_jobs(tmp_path):
-    queue = JobQueue(
-        tmp_path / "jobs.sqlite3",
-        artifacts_dir=tmp_path / "runs",
-        thermal_guard=FakeThermalGuard(temperature_c=44.5),
-    )
-    client = TestClient(create_app(queue=queue))
+def test_status_exposes_fast_session_snapshot(tmp_path):
+    client = make_client(tmp_path, thermal_guard=FakeThermalGuard(temperature_c=44.5))
 
     response = client.get("/api/status")
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["thermal"]["available"] is True
     assert payload["thermal"]["temperature_c"] == 44.5
-    assert payload["jobs"] == []
+    assert payload["sessions"] == {"active_session_id": None, "queued": 0}
 
 
-def test_api_blocks_runs_when_fpga_is_over_temperature(tmp_path):
-    queue = JobQueue(
-        tmp_path / "jobs.sqlite3",
-        artifacts_dir=tmp_path / "runs",
-        thermal_guard=FakeThermalGuard(available=False, temperature_c=80.0, reason="too hot"),
-    )
-    client = TestClient(create_app(queue=queue))
+def test_status_fast_path_does_not_probe_hardware(tmp_path):
+    client = make_client(tmp_path, thermal_guard=BlockingThermalGuard(temperature_c=44.5))
 
-    response = client.post("/api/demos/gpgpu-nbody/run", json={"input": {}})
+    response = client.get("/api/status")
+
+    assert response.status_code == 200
+    assert response.json()["thermal"]["temperature_c"] == 44.5
+
+
+def test_public_status_refresh_is_rejected(tmp_path):
+    client = make_client(tmp_path)
+
+    response = client.get("/api/status?refresh=true")
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["error"]["code"] == "unsupported_parameter"
+
+
+def test_session_request_rejects_thermal_unavailable(tmp_path):
+    client = make_client(tmp_path, thermal_guard=FakeThermalGuard(available=False, temperature_c=80.0, reason="too hot"))
+
+    response = client.post("/api/sessions", json={"project_id": "ece338-gpgpu-nbody-3d"})
 
     assert response.status_code == 503
-    assert response.json()["detail"]["thermal"]["available"] is False
+    assert response.json()["detail"]["error"]["code"] == "hardware_unavailable"
     assert "too hot" in response.text

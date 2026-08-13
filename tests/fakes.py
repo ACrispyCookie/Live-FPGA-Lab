@@ -14,9 +14,20 @@ class FakeThermalGuard:
     def status(self, *, refresh=False):
         return self._status
 
+    def snapshot(self):
+        return self._status
+
     def assert_available(self):
         if not self._status.available:
             from fpga_demo_platform.thermal import HardwareUnavailable
 
             raise HardwareUnavailable(self._status.reason or "unavailable", status=self._status)
         return self._status
+
+
+class BlockingThermalGuard(FakeThermalGuard):
+    def status(self, *, refresh=False):
+        raise AssertionError("fast API status must not probe hardware")
+
+    def assert_available(self):
+        raise AssertionError("fast API status must not assert hardware availability")

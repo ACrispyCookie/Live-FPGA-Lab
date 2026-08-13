@@ -1,0 +1,171 @@
+import sqlite3
+from datetime import UTC, datetime, timedelta
+
+from fastapi.testclient import TestClient
+
+from fpga_demo_platform.api import create_app
+from fpga_demo_platform.sessions import SessionManager
+from tests.fakes import FakeThermalGuard
+
+
+def make_client(tmp_path, *, thermal_guard=None):
+    manager = SessionManager(
+        tmp_path / "sessions.sqlite3",
+        artifacts_dir=tmp_path / "sessions",
+        thermal_guard=thermal_guard or FakeThermalGuard(),
+    )
+    return TestClient(create_app(session_manager=manager)), manager
+
+
+def test_public_api_uses_sessions_not_jobs(tmp_path):
+    client, _ = make_client(tmp_path)
+
+    assert client.post("/api/jobs", json={"project_id": "ece338-gpgpu-nbody-3d"}).status_code == 404
+    assert client.get("/api/jobs").status_code == 404
+    assert client.post("/api/worker/run-next").status_code == 404
+    assert client.get("/api/status?refresh=true").status_code == 422
+
+
+def test_create_session_grants_only_one_active_lease(tmp_path):
+    client, _ = make_client(tmp_path)
+
+    first = client.post("/api/sessions", json={"project_id": "ece338-gpgpu-nbody-3d"}, headers={"x-forwarded-for": "198.51.100.1"})
+    second = client.post("/api/sessions", json={"project_id": "ece338-gpgpu-nbody-3d"}, headers={"x-forwarded-for": "198.51.100.2"})
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert first.json()["state"] == "active"
+    assert first.json()["queue_position"] is None
+    assert first.json()["lease"]["remaining_seconds"] > 0
+    assert second.json()["state"] == "queued"
+    assert second.json()["queue_position"] == 1
+
+    status = client.get("/api/status").json()
+    assert status["board"]["locked_by_session_id"] == first.json()["id"]
+    assert status["sessions"]["active_session_id"] == first.json()["id"]
+    assert status["sessions"]["queued"] == 1
+
+
+def test_release_active_session_grants_next_waiting_session(tmp_path):
+    client, _ = make_client(tmp_path)
+    first = client.post("/api/sessions", json={"project_id": "ece338-gpgpu-nbody-3d"}, headers={"x-forwarded-for": "198.51.100.1"}).json()
+    second = client.post("/api/sessions", json={"project_id": "ece338-gpgpu-nbody-3d"}, headers={"x-forwarded-for": "198.51.100.2"}).json()
+
+    released = client.delete(f"/api/sessions/{first['id']}")
+
+    assert released.status_code == 200
+    assert released.json()["state"] == "released"
+    promoted = client.get(f"/api/sessions/{second['id']}").json()
+    assert promoted["state"] == "active"
+    assert promoted["queue_position"] is None
+    assert promoted["lease"]["remaining_seconds"] > 0
+
+
+def test_session_submission_blocks_when_thermal_unavailable(tmp_path):
+    client, _ = make_client(tmp_path, thermal_guard=FakeThermalGuard(available=False, reason="too hot"))
+
+    response = client.post("/api/sessions", json={"project_id": "ece338-gpgpu-nbody-3d"})
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["error"]["code"] == "hardware_unavailable"
+    assert "too hot" in response.text
+
+
+def test_same_requester_cannot_hold_or_queue_multiple_sessions(tmp_path):
+    client, _ = make_client(tmp_path)
+
+    first = client.post("/api/sessions", json={"project_id": "ece338-gpgpu-nbody-3d"}, headers={"x-forwarded-for": "198.51.100.50"})
+    second = client.post("/api/sessions", json={"project_id": "ece338-gpgpu-nbody-3d"}, headers={"x-forwarded-for": "198.51.100.50"})
+
+    assert first.status_code == 201
+    assert second.status_code == 429
+    assert second.json()["detail"]["error"]["code"] == "session_limit"
+
+
+def test_session_request_rejects_unknown_fields_and_project_ids(tmp_path):
+    client, _ = make_client(tmp_path)
+
+    assert client.post("/api/sessions", json={"project_id": "missing"}).status_code == 404
+    response = client.post("/api/sessions", json={"project_id": "ece338-gpgpu-nbody-3d", "uart_port": "/dev/ttyUSB0"})
+    assert response.status_code == 422
+
+
+def test_session_artifacts_are_manifest_scoped(tmp_path):
+    client, manager = make_client(tmp_path)
+    session = client.post("/api/sessions", json={"project_id": "ece338-gpgpu-nbody-3d"}).json()
+    manager.publish_artifact(session["id"], "session.log", "log", "hello\n")
+
+    artifact = client.get(f"/api/sessions/{session['id']}/artifacts/session.log")
+    traversal = client.get(f"/api/sessions/{session['id']}/artifacts/../sessions.sqlite3")
+
+    assert artifact.status_code == 200
+    assert artifact.text == "hello\n"
+    assert traversal.status_code in {400, 404}
+
+
+def test_websocket_streams_session_events(tmp_path):
+    client, _ = make_client(tmp_path)
+
+    with client.websocket_connect("/api/ws") as ws:
+        assert ws.receive_json()["type"] == "hello"
+        ws.send_json({"type": "subscribe", "channels": ["queue", "sessions", "board"]})
+        assert ws.receive_json()["type"] == "subscribed"
+        snapshot_types = {ws.receive_json()["type"] for _ in range(2)}
+        assert "queue.snapshot" in snapshot_types
+        assert "board.status" in snapshot_types
+        created = client.post("/api/sessions", json={"project_id": "ece338-gpgpu-nbody-3d"})
+        assert created.status_code == 201
+        events = [ws.receive_json()["type"] for _ in range(3)]
+        assert "session.created" in events
+        assert "queue.changed" in events
+        assert "board.status" in events
+
+
+def test_finished_session_history_is_purged_by_age_and_removes_artifacts(tmp_path):
+    _, manager = make_client(tmp_path)
+    old_dir = tmp_path / "sessions" / "sess_old"
+    old_dir.mkdir(parents=True)
+    (old_dir / "session.log").write_text("old", encoding="utf-8")
+    old_time = (datetime.now(UTC) - timedelta(days=2)).isoformat()
+    with sqlite3.connect(tmp_path / "sessions.sqlite3") as conn:
+        conn.execute(
+            """
+            INSERT INTO sessions (id, project_id, demo_id, state, requester, created_at, released_at, artifact_dir)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("sess_old", "ece338-gpgpu-nbody-3d", "gpgpu-nbody", "released", "old", old_time, old_time, str(old_dir)),
+        )
+        conn.execute(
+            "INSERT INTO artifacts (session_id, name, kind, path, content_type) VALUES (?, ?, ?, ?, ?)",
+            ("sess_old", "session.log", "log", str(old_dir / "session.log"), "text/plain"),
+        )
+
+    removed = manager.purge_history(retention_seconds=24 * 60 * 60, max_finished=200)
+
+    assert removed == 1
+    assert not old_dir.exists()
+    with sqlite3.connect(tmp_path / "sessions.sqlite3") as conn:
+        assert conn.execute("SELECT COUNT(*) FROM sessions WHERE id = 'sess_old'").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM artifacts WHERE session_id = 'sess_old'").fetchone()[0] == 0
+
+
+def test_finished_session_history_is_capped_by_count(tmp_path):
+    _, manager = make_client(tmp_path)
+    now = datetime.now(UTC)
+    with sqlite3.connect(tmp_path / "sessions.sqlite3") as conn:
+        for idx in range(3):
+            when = (now + timedelta(seconds=idx)).isoformat()
+            conn.execute(
+                """
+                INSERT INTO sessions (id, project_id, demo_id, state, requester, created_at, released_at, artifact_dir)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (f"sess_{idx}", "ece338-gpgpu-nbody-3d", "gpgpu-nbody", "released", str(idx), when, when, str(tmp_path / "sessions" / f"sess_{idx}")),
+            )
+
+    removed = manager.purge_history(retention_seconds=365 * 24 * 60 * 60, max_finished=2)
+
+    assert removed == 1
+    with sqlite3.connect(tmp_path / "sessions.sqlite3") as conn:
+        ids = {row[0] for row in conn.execute("SELECT id FROM sessions")}
+    assert ids == {"sess_1", "sess_2"}

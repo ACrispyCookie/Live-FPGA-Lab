@@ -52,6 +52,17 @@ class ThermalGuard:
         self._cached = self._read_status()
         return self._cached
 
+    def snapshot(self) -> ThermalStatus:
+        if self._cached is not None:
+            return self._cached
+        return ThermalStatus(
+            available=False,
+            temperature_c=None,
+            max_temperature_c=self.max_temperature_c,
+            reason="FPGA thermal status has not been checked yet",
+            checked_at=datetime.now(UTC).isoformat(),
+        )
+
     def assert_available(self) -> ThermalStatus:
         status = self.status(refresh=True)
         if not status.available:

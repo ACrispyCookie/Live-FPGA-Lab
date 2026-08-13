@@ -162,10 +162,12 @@ class JobQueue:
         return self.finish(job.id, status="succeeded", result=result)
 
     def thermal_status(self, *, refresh: bool = False) -> dict[str, Any]:
-        status = self.thermal_guard.status(refresh=refresh)
-        if not status.available:
+        status = self.thermal_guard.status(refresh=True) if refresh else self.thermal_guard.snapshot()
+        payload = status.to_dict()
+        payload["stale"] = not refresh
+        if refresh and not status.available:
             self._cancel_running_jobs(status.reason or "FPGA is currently unavailable")
-        return status.to_dict()
+        return payload
 
     def _cancel_for_overload_if_needed(self) -> None:
         status = self.thermal_guard.status(refresh=True)

@@ -6,7 +6,7 @@ from fpga_demo_platform.demos import get_demo, list_demos
 def test_discovers_demo_folder_definitions():
     demos = list_demos()
 
-    assert [demo.id for demo in demos] == ["gpgpu-nbody", "matrix-accelerator", "riscv-core", "signal-lab"]
+    assert [demo.id for demo in demos] == ["gpgpu-nbody"]
     demo = get_demo("gpgpu-nbody")
     assert demo.board == "HelloFPGA ZYNQ7000"
     assert demo.root.name == "gpgpu-nbody"
