@@ -5,7 +5,8 @@ from fastapi.testclient import TestClient
 
 from fpga_demo_platform.api import create_app
 from fpga_demo_platform.sessions import SessionManager
-from tests.fakes import FakeThermalGuard
+from fpga_demo_platform.thermal import ThermalStatus
+from tests.fakes import FakeThermalGuard, SequenceThermalGuard
 
 
 def make_client(tmp_path, *, thermal_guard=None):
@@ -119,6 +120,68 @@ def test_websocket_streams_session_events(tmp_path):
         assert "session.created" in events
         assert "queue.changed" in events
         assert "board.status" in events
+
+
+def test_board_monitor_marks_active_session_failed_when_thermal_becomes_unsafe(tmp_path):
+    guard = SequenceThermalGuard([
+        ThermalStatus(True, 45.0, 75.0, None, "2026-08-12T00:00:00+00:00"),
+        ThermalStatus(False, 82.0, 75.0, "too hot", "2026-08-12T00:00:10+00:00"),
+    ])
+    _, manager = make_client(tmp_path, thermal_guard=guard)
+    session = manager.request_session("ece338-gpgpu-nbody-3d", requester="user-a")
+
+    status = manager.check_board_safety()
+
+    failed = manager.get(session.id)
+    assert status["thermal"]["available"] is False
+    assert failed.state == "failed"
+    assert failed.error == "thermal lockout: too hot"
+
+
+def test_board_monitor_keeps_queued_sessions_queued_during_thermal_lockout(tmp_path):
+    guard = SequenceThermalGuard([
+        ThermalStatus(True, 45.0, 75.0, None, "2026-08-12T00:00:00+00:00"),
+        ThermalStatus(True, 46.0, 75.0, None, "2026-08-12T00:00:01+00:00"),
+        ThermalStatus(False, 82.0, 75.0, "too hot", "2026-08-12T00:00:10+00:00"),
+    ])
+    _, manager = make_client(tmp_path, thermal_guard=guard)
+    first = manager.request_session("ece338-gpgpu-nbody-3d", requester="user-a")
+    second = manager.request_session("ece338-gpgpu-nbody-3d", requester="user-b")
+
+    manager.check_board_safety()
+
+    assert manager.get(first.id).state == "failed"
+    assert manager.get(second.id).state == "queued"
+
+
+def test_board_monitor_promotes_queued_session_after_thermal_recovery(tmp_path):
+    guard = SequenceThermalGuard([
+        ThermalStatus(True, 45.0, 75.0, None, "2026-08-12T00:00:00+00:00"),
+        ThermalStatus(True, 46.0, 75.0, None, "2026-08-12T00:00:01+00:00"),
+        ThermalStatus(False, 82.0, 75.0, "too hot", "2026-08-12T00:00:10+00:00"),
+        ThermalStatus(True, 55.0, 75.0, None, "2026-08-12T00:00:20+00:00"),
+    ])
+    _, manager = make_client(tmp_path, thermal_guard=guard)
+    first = manager.request_session("ece338-gpgpu-nbody-3d", requester="user-a")
+    second = manager.request_session("ece338-gpgpu-nbody-3d", requester="user-b")
+
+    manager.check_board_safety()
+    manager.check_board_safety()
+
+    assert manager.get(first.id).state == "failed"
+    assert manager.get(second.id).state == "active"
+
+
+def test_release_does_not_promote_queued_session_when_cached_thermal_is_unsafe(tmp_path):
+    guard = FakeThermalGuard(available=True, temperature_c=45.0)
+    _, manager = make_client(tmp_path, thermal_guard=guard)
+    first = manager.request_session("ece338-gpgpu-nbody-3d", requester="user-a")
+    second = manager.request_session("ece338-gpgpu-nbody-3d", requester="user-b")
+    guard._status = ThermalStatus(False, 82.0, 75.0, "too hot", "2026-08-12T00:00:10+00:00")
+
+    manager.release(first.id)
+
+    assert manager.get(second.id).state == "queued"
 
 
 def test_finished_session_history_is_purged_by_age_and_removes_artifacts(tmp_path):

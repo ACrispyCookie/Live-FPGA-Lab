@@ -47,6 +47,7 @@ def test_status_exposes_fast_session_snapshot(tmp_path):
     assert response.status_code == 200
     payload = response.json()
     assert payload["thermal"]["temperature_c"] == 44.5
+    assert payload["thermal"]["stale"] is False
     assert payload["sessions"] == {"active_session_id": None, "queued": 0}
 
 

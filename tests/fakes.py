@@ -31,3 +31,27 @@ class BlockingThermalGuard(FakeThermalGuard):
 
     def assert_available(self):
         raise AssertionError("fast API status must not assert hardware availability")
+
+
+class SequenceThermalGuard:
+    def __init__(self, statuses):
+        self.statuses = list(statuses)
+        self.index = 0
+
+    def status(self, *, refresh=False):
+        if not refresh:
+            return self.snapshot()
+        current = self.statuses[min(self.index, len(self.statuses) - 1)]
+        self.index += 1
+        return current
+
+    def snapshot(self):
+        return self.statuses[min(max(self.index - 1, 0), len(self.statuses) - 1)]
+
+    def assert_available(self):
+        status = self.status(refresh=True)
+        if not status.available:
+            from fpga_demo_platform.thermal import HardwareUnavailable
+
+            raise HardwareUnavailable(status.reason or "unavailable", status=status)
+        return status

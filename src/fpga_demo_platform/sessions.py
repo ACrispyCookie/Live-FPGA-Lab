@@ -103,10 +103,31 @@ class SessionManager:
         self.artifacts_dir = Path(artifacts_dir)
         self.thermal_guard = thermal_guard or ThermalGuard()
         self.event_bus = event_bus or EventBus()
+        self._monitor_stop = threading.Event()
+        self._monitor_thread: threading.Thread | None = None
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.artifacts_dir.mkdir(parents=True, exist_ok=True)
         self._init_db()
         self.purge_history()
+
+    def start_board_monitor(self, *, interval_seconds: float = 15.0) -> None:
+        if self._monitor_thread and self._monitor_thread.is_alive():
+            return
+        self._monitor_stop.clear()
+        self._monitor_thread = threading.Thread(target=self._board_monitor_loop, args=(interval_seconds,), daemon=True)
+        self._monitor_thread.start()
+
+    def stop_board_monitor(self) -> None:
+        self._monitor_stop.set()
+        if self._monitor_thread:
+            self._monitor_thread.join(timeout=2)
+
+    def _board_monitor_loop(self, interval_seconds: float) -> None:
+        while not self._monitor_stop.wait(interval_seconds):
+            try:
+                self.check_board_safety()
+            except Exception as exc:
+                self.event_bus.publish("safety.monitor_error", {"error": str(exc)})
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
@@ -217,7 +238,7 @@ class SessionManager:
             else:
                 new_state = "released"
             conn.execute("UPDATE sessions SET state = ?, released_at = ? WHERE id = ?", (new_state, now, session_id))
-            if row["state"] in {"active", "starting", "releasing"}:
+            if row["state"] in {"active", "starting", "releasing"} and self.thermal_guard.snapshot().available:
                 self._promote_next_locked(conn)
         session = self.get(session_id)
         self.event_bus.publish("session.finished", {"session": session_to_dict(session)})
@@ -267,6 +288,35 @@ class SessionManager:
         self.event_bus.publish("artifact.created", {"session_id": session_id, "artifact": artifact_to_dict(session_id, artifact)})
         return artifact
 
+    def check_board_safety(self) -> dict[str, Any]:
+        thermal_status = self.thermal_guard.status(refresh=True)
+        failed_session_id = None
+        failed_session = None
+        promoted = False
+        now = _now()
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            active = conn.execute("SELECT * FROM sessions WHERE state IN ('starting', 'active', 'releasing') ORDER BY created_at ASC LIMIT 1").fetchone()
+            if not thermal_status.available and active is not None:
+                failed_session_id = active["id"]
+                reason = thermal_status.reason or "thermal status unavailable"
+                conn.execute(
+                    "UPDATE sessions SET state = 'failed', released_at = ?, error = ? WHERE id = ?",
+                    (now, f"thermal lockout: {reason}", failed_session_id),
+                )
+            elif thermal_status.available and active is None:
+                promoted = self._promote_next_locked(conn)
+        if failed_session_id is not None:
+            failed_session = self.get(failed_session_id)
+            self.event_bus.publish("safety.lockout", {"thermal": thermal_status.to_dict(), "session": session_to_dict(failed_session)})
+            self.event_bus.publish("session.finished", {"session": session_to_dict(failed_session)})
+            self.event_bus.publish("queue.changed", {"queue": self.queue_summary()})
+        elif promoted:
+            self.event_bus.publish("queue.changed", {"queue": self.queue_summary()})
+        status = self.board_status(thermal_status=thermal_status)
+        self.event_bus.publish("board.status", status)
+        return status
+
     def get_artifact(self, session_id: str, name: str) -> Artifact:
         safe_name = _safe_artifact_name(name)
         with self._connect() as conn:
@@ -282,13 +332,14 @@ class SessionManager:
             next_row = conn.execute("SELECT id FROM sessions WHERE state = 'queued' ORDER BY created_at ASC LIMIT 1").fetchone()
         return {"queued": queued, "active_session_id": active["id"] if active else None, "next_session_id": next_row["id"] if next_row else None}
 
-    def board_status(self) -> dict[str, Any]:
-        thermal = self.thermal_guard.snapshot().to_dict()
+    def board_status(self, *, thermal_status=None) -> dict[str, Any]:
+        thermal = (thermal_status or self.thermal_guard.snapshot()).to_dict()
+        stale = thermal_status is None and thermal.get("temperature_c") is None and thermal.get("reason") == "FPGA thermal status has not been checked yet"
         summary = self.queue_summary()
         locked = summary["active_session_id"]
         return {
             "board": {"available": thermal.get("available") is True and locked is None, "mode": "leased" if locked else "idle", "locked_by_session_id": locked},
-            "thermal": {**thermal, "stale": True},
+            "thermal": {**thermal, "stale": stale},
         }
 
     def status_snapshot(self) -> dict[str, Any]:
@@ -346,15 +397,16 @@ class SessionManager:
             self._remove_artifact_dir(artifact_dir)
         return len(ids)
 
-    def _promote_next_locked(self, conn: sqlite3.Connection) -> None:
+    def _promote_next_locked(self, conn: sqlite3.Connection) -> bool:
         row = conn.execute("SELECT id FROM sessions WHERE state = 'queued' ORDER BY created_at ASC LIMIT 1").fetchone()
         if row is None:
-            return
+            return False
         now_dt = datetime.now(UTC)
         conn.execute(
             "UPDATE sessions SET state = 'active', lease_started_at = ?, lease_expires_at = ? WHERE id = ?",
             (_iso(now_dt), _iso(now_dt + timedelta(seconds=DEFAULT_LEASE_SECONDS)), row["id"]),
         )
+        return True
 
     def _remove_artifact_dir(self, artifact_dir: str) -> None:
         path = Path(artifact_dir).resolve()

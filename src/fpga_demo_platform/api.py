@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import queue
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +22,15 @@ class SessionRequest(BaseModel):
 
 
 def create_app(*, session_manager: SessionManager) -> FastAPI:
-    app = FastAPI(title="FPGA Demo Platform", version="0.1.0")
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        session_manager.start_board_monitor(interval_seconds=_monitor_interval_seconds())
+        try:
+            yield
+        finally:
+            session_manager.stop_board_monitor()
+
+    app = FastAPI(title="FPGA Demo Platform", version="0.1.0", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_cors_origins(),
@@ -29,6 +38,7 @@ def create_app(*, session_manager: SessionManager) -> FastAPI:
         allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
         allow_headers=["*"],
     )
+
 
     @app.get("/")
     def service_root() -> dict[str, str]:
@@ -196,6 +206,10 @@ def _cors_origins() -> list[str]:
     configured = os.environ.get("FPGA_DEMO_CORS_ORIGINS", "*")
     origins = [origin.strip() for origin in configured.split(",") if origin.strip()]
     return origins or ["*"]
+
+
+def _monitor_interval_seconds() -> float:
+    return max(1.0, float(os.environ.get("FPGA_DEMO_BOARD_MONITOR_SECONDS", "15")))
 
 
 def _requester(request: Request) -> str | None:
