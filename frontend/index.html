@@ -141,6 +141,7 @@
       reconnectTimer: null,
       pollTimer: null,
       seenLogs: new Set(),
+      subscribedSessionId: null,
     };
 
     const $ = id => document.getElementById(id);
@@ -194,6 +195,7 @@
     }
     function clearSession() {
       state.session = null;
+      state.subscribedSessionId = null;
       localStorage.removeItem('fpga.session');
       $('demoFrame').hidden = true;
       $('demoFrame').src = 'about:blank';
@@ -244,7 +246,10 @@
       }
     }
     function connectWs() {
-      if (state.ws) state.ws.close();
+      if (state.ws) {
+        state.ws.onclose = null;
+        state.ws.close();
+      }
       if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
       state.ws = new WebSocket(wsUrl());
       $('wsDot').className = 'dot warn';
@@ -252,12 +257,14 @@
       state.ws.onopen = () => {
         $('wsDot').className = 'dot good';
         $('wsState').textContent = 'WebSocket connected';
+        state.subscribedSessionId = null;
         state.ws.send(JSON.stringify({type:'subscribe', channels:['board','queue','sessions']}));
-        subscribeCurrentSession();
+        subscribeCurrentSession(true);
       };
       state.ws.onclose = () => {
         $('wsDot').className = 'dot bad';
         $('wsState').textContent = 'WebSocket disconnected — polling fallback active';
+        state.subscribedSessionId = null;
         state.reconnectTimer = setTimeout(connectWs, 3000);
       };
       state.ws.onerror = () => { $('wsDot').className = 'dot bad'; $('wsState').textContent = 'WebSocket error'; };
@@ -281,9 +288,11 @@
       };
     }
 
-    function subscribeCurrentSession() {
+    function subscribeCurrentSession(force = false) {
       if (state.ws?.readyState === WebSocket.OPEN && state.session?.id) {
+        if (!force && state.subscribedSessionId === state.session.id) return;
         state.ws.send(JSON.stringify({type:'subscribe_session', session_id: state.session.id, logs:true}));
+        state.subscribedSessionId = state.session.id;
       }
     }
 
