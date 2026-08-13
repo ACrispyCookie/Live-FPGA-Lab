@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FPGA Session Test Frontend</title>
+  <style>
+    * { box-sizing: border-box; }
+    :root {
+      color-scheme: dark;
+      --bg: #0b1020;
+      --panel: #11182c;
+      --panel-2: #151f37;
+      --line: #26324f;
+      --text: #e7ecff;
+      --muted: #93a2c9;
+      --accent: #7dd3fc;
+      --good: #86efac;
+      --warn: #fde68a;
+      --bad: #fca5a5;
+    }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at top left, #172554 0, transparent 34rem), var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    header { padding: 28px 32px 18px; border-bottom: 1px solid var(--line); background: rgba(11,16,32,.75); backdrop-filter: blur(12px); position: sticky; top: 0; z-index: 2; }
+    h1 { margin: 0 0 6px; font-size: 28px; letter-spacing: -.03em; }
+    header p { margin: 0; color: var(--muted); }
+    main { display: grid; grid-template-columns: 390px 1fr; gap: 18px; padding: 18px; }
+    .card { background: linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.02)); border: 1px solid var(--line); border-radius: 18px; padding: 16px; box-shadow: 0 18px 50px rgba(0,0,0,.25); }
+    .stack { display: grid; gap: 14px; align-content: start; }
+    label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: .08em; }
+    input, select { width: 100%; border-radius: 12px; border: 1px solid var(--line); background: #0c1326; color: var(--text); padding: 10px 12px; outline: none; }
+    button { border: 0; border-radius: 12px; padding: 10px 12px; background: var(--accent); color: #07111d; font-weight: 700; cursor: pointer; }
+    button.secondary { background: #26324f; color: var(--text); }
+    button.danger { background: #ef4444; color: white; }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    .row { display: flex; gap: 8px; align-items: center; }
+    .row > * { flex: 1; }
+    .pill { display: inline-flex; align-items: center; gap: 7px; padding: 5px 9px; border-radius: 999px; background: #18213a; border: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+    .dot { width: 8px; height: 8px; border-radius: 999px; background: var(--muted); }
+    .dot.good { background: var(--good); }
+    .dot.warn { background: var(--warn); }
+    .dot.bad { background: var(--bad); }
+    .project { padding: 12px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.03); display: grid; gap: 8px; }
+    .project h3 { margin: 0; font-size: 15px; }
+    .project p { margin: 0; color: var(--muted); font-size: 13px; }
+    .session-box { display: grid; gap: 8px; }
+    .kv { display: grid; grid-template-columns: 130px 1fr; gap: 6px; font-size: 13px; }
+    .kv span:first-child { color: var(--muted); }
+    pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.45; }
+    #logs { height: 260px; overflow: auto; background: #050914; border: 1px solid var(--line); border-radius: 14px; padding: 12px; }
+    #events { height: 120px; overflow: auto; background: #050914; border: 1px solid var(--line); border-radius: 14px; padding: 12px; color: var(--muted); }
+    iframe { width: 100%; min-height: calc(100vh - 170px); border: 1px solid var(--line); border-radius: 18px; background: #020617; }
+    .empty { min-height: calc(100vh - 170px); display: grid; place-items: center; color: var(--muted); text-align: center; border: 1px dashed var(--line); border-radius: 18px; }
+    .tiny { font-size: 12px; color: var(--muted); }
+    @media (max-width: 950px) { main { grid-template-columns: 1fr; } iframe, .empty { min-height: 520px; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>FPGA Session Test Frontend</h1>
+    <p>Standalone tester for projects → queue → startup logs → active GPGPU demo → release.</p>
+  </header>
+  <main>
+    <section class="stack">
+      <div class="card">
+        <label for="apiBase">API base</label>
+        <div class="row">
+          <input id="apiBase" />
+          <button class="secondary" id="saveApi">Save</button>
+        </div>
+        <p class="tiny" style="margin-bottom:0">Use <code>https://fpga.njason.dev/api</code> for public route, or <code>http://main:9121/api</code> on LAN/VPN.</p>
+      </div>
+
+      <div class="card">
+        <div class="row" style="justify-content:space-between">
+          <span class="pill"><span id="wsDot" class="dot"></span><span id="wsState">WebSocket disconnected</span></span>
+          <button class="secondary" id="refresh">Refresh</button>
+        </div>
+        <div style="height:10px"></div>
+        <div class="kv"><span>Board</span><strong id="boardState">—</strong></div>
+        <div class="kv"><span>Thermal</span><strong id="thermalState">—</strong></div>
+        <div class="kv"><span>Queue</span><strong id="queueState">—</strong></div>
+      </div>
+
+      <div class="card">
+        <label for="projectSelect">Runnable project</label>
+        <select id="projectSelect"></select>
+        <div id="projectInfo" class="project" style="margin-top:10px"></div>
+        <div class="row" style="margin-top:12px">
+          <button id="requestSession">Request session</button>
+          <button id="startSession" class="secondary" disabled>Start / prepare</button>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button id="endSession" class="danger" disabled>End session</button>
+          <button id="clearLocal" class="secondary">Clear local session</button>
+        </div>
+      </div>
+
+      <div class="card session-box">
+        <label>Session</label>
+        <div class="kv"><span>ID</span><strong id="sessionId">—</strong></div>
+        <div class="kv"><span>State</span><strong id="sessionState">—</strong></div>
+        <div class="kv"><span>Queue position</span><strong id="sessionQueue">—</strong></div>
+        <div class="kv"><span>Lease</span><strong id="sessionLease">—</strong></div>
+        <div class="kv"><span>Token</span><strong id="tokenState">—</strong></div>
+      </div>
+
+      <div class="card">
+        <label>Startup / session logs</label>
+        <pre id="logs"></pre>
+      </div>
+
+      <div class="card">
+        <label>Recent events</label>
+        <pre id="events"></pre>
+      </div>
+    </section>
+
+    <section>
+      <div id="demoEmpty" class="empty">
+        <div>
+          <h2>Demo frame will appear here</h2>
+          <p>Request a session, wait until it is starting, then press “Start / prepare”.</p>
+        </div>
+      </div>
+      <iframe id="demoFrame" hidden title="GPGPU nbody demo"></iframe>
+    </section>
+  </main>
+
+  <script>
+    const state = {
+      apiBase: localStorage.getItem('fpga.apiBase') || (location.protocol.startsWith('http') ? `${location.origin}/api` : 'https://fpga.njason.dev/api'),
+      projects: [],
+      session: JSON.parse(localStorage.getItem('fpga.session') || 'null'),
+      ws: null,
+    };
+
+    const $ = id => document.getElementById(id);
+    $('apiBase').value = state.apiBase;
+
+    function log(line) {
+      const box = $('logs');
+      box.textContent += `${new Date().toLocaleTimeString()} ${line}\n`;
+      box.scrollTop = box.scrollHeight;
+    }
+    function eventLog(obj) {
+      const box = $('events');
+      box.textContent += `${new Date().toLocaleTimeString()} ${obj.type || 'event'}\n`;
+      box.scrollTop = box.scrollHeight;
+    }
+    function api(path) { return `${state.apiBase}${path}`; }
+    function wsUrl() {
+      const url = new URL(state.apiBase);
+      url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+      url.pathname = url.pathname.replace(/\/$/, '') + '/ws';
+      return url.toString();
+    }
+    function sessionHeaders() {
+      return state.session?.owner_token ? {'x-session-token': state.session.owner_token} : {};
+    }
+    async function request(path, options={}) {
+      const res = await fetch(api(path), { ...options, headers: { ...(options.headers || {}) } });
+      const text = await res.text();
+      let data = null;
+      try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+      if (!res.ok) throw new Error(`${res.status}: ${typeof data === 'string' ? data : JSON.stringify(data)}`);
+      return data;
+    }
+    function saveSession(session) {
+      state.session = session;
+      localStorage.setItem('fpga.session', JSON.stringify(session));
+      renderSession();
+      connectWs();
+    }
+    function clearSession() {
+      state.session = null;
+      localStorage.removeItem('fpga.session');
+      $('demoFrame').hidden = true;
+      $('demoFrame').src = 'about:blank';
+      $('demoEmpty').hidden = false;
+      renderSession();
+      connectWs();
+    }
+    function renderSession() {
+      const s = state.session;
+      $('sessionId').textContent = s?.id || '—';
+      $('sessionState').textContent = s?.state || '—';
+      $('sessionQueue').textContent = s?.queue_position ?? '—';
+      $('sessionLease').textContent = s?.lease ? `${s.lease.remaining_seconds}s left, expires ${new Date(s.lease.expires_at).toLocaleTimeString()}` : '—';
+      $('tokenState').textContent = s?.owner_token ? 'stored locally' : '—';
+      $('startSession').disabled = !(s && s.state === 'starting' && s.owner_token);
+      $('endSession').disabled = !(s && ['starting','active','queued'].includes(s.state) && s.owner_token);
+      if (s?.state === 'active' && s.access?.url && s.owner_token) {
+        const frameUrl = new URL(s.access.url, state.apiBase.replace(/\/api\/?$/, ''));
+        frameUrl.searchParams.set('token', s.owner_token);
+        $('demoFrame').src = frameUrl.toString();
+        $('demoFrame').hidden = false;
+        $('demoEmpty').hidden = true;
+      }
+    }
+    function renderStatus(payload) {
+      const board = payload.board || {};
+      const thermal = payload.thermal || {};
+      $('boardState').textContent = `${board.mode || 'unknown'} ${board.locked_by_session_id ? `(${board.locked_by_session_id})` : ''}`;
+      $('thermalState').textContent = thermal.available ? `${thermal.temperature_c}°C / max ${thermal.max_temperature_c}°C` : (thermal.reason || 'unavailable');
+      $('queueState').textContent = `${payload.sessions?.queued ?? 0} queued`;
+    }
+    function renderProjects() {
+      const runnable = state.projects.filter(p => p.runnable);
+      $('projectSelect').innerHTML = runnable.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+      const selected = runnable.find(p => p.id === $('projectSelect').value) || runnable[0];
+      $('projectInfo').innerHTML = selected ? `<h3>${selected.name}</h3><p>${selected.source} · ${selected.source_ref}</p><p>${selected.lease?.duration_seconds || '?'}s default lease</p>` : '<p>No runnable projects.</p>';
+    }
+    async function refreshAll() {
+      const [status, projects] = await Promise.all([request('/status'), request('/projects')]);
+      state.projects = projects;
+      renderStatus(status);
+      renderProjects();
+      if (state.session?.id) {
+        try {
+          const latest = await request(`/sessions/${state.session.id}`);
+          saveSession({...state.session, ...latest, owner_token: state.session.owner_token});
+        } catch (err) { log(`session refresh failed: ${err.message}`); }
+      }
+    }
+    function connectWs() {
+      if (state.ws) state.ws.close();
+      state.ws = new WebSocket(wsUrl());
+      $('wsDot').className = 'dot warn';
+      $('wsState').textContent = 'WebSocket connecting';
+      state.ws.onopen = () => {
+        $('wsDot').className = 'dot good';
+        $('wsState').textContent = 'WebSocket connected';
+        state.ws.send(JSON.stringify({type:'subscribe', channels:['board','queue','sessions']}));
+        if (state.session?.id) state.ws.send(JSON.stringify({type:'subscribe_session', session_id: state.session.id, logs:true}));
+      };
+      state.ws.onclose = () => { $('wsDot').className = 'dot bad'; $('wsState').textContent = 'WebSocket disconnected'; };
+      state.ws.onerror = () => { $('wsDot').className = 'dot bad'; $('wsState').textContent = 'WebSocket error'; };
+      state.ws.onmessage = ev => {
+        const msg = JSON.parse(ev.data);
+        eventLog(msg);
+        if (msg.type === 'board.status') renderStatus({board:msg.board, thermal:msg.thermal, sessions:{queued:0}});
+        if (msg.type === 'queue.snapshot' || msg.type === 'queue.changed') $('queueState').textContent = `${msg.queue?.queued ?? 0} queued`;
+        if (msg.type === 'session.log') log(`[${msg.phase}] ${msg.message}`);
+        if (msg.type === 'session.expiring') log(`[expiring] ${msg.remaining_seconds}s left (${msg.reason})`);
+        if ((msg.type === 'session.snapshot' || msg.type === 'session.updated' || msg.type === 'session.ready' || msg.type === 'session.finished') && msg.session && state.session?.id === msg.session.id) {
+          saveSession({...state.session, ...msg.session, owner_token: state.session.owner_token});
+        }
+        if (msg.type === 'session.ready') log('Demo is ready. Loading iframe...');
+      };
+    }
+
+    $('saveApi').onclick = () => { state.apiBase = $('apiBase').value.replace(/\/$/, ''); localStorage.setItem('fpga.apiBase', state.apiBase); connectWs(); refreshAll().catch(e => log(e.message)); };
+    $('refresh').onclick = () => refreshAll().catch(e => log(e.message));
+    $('projectSelect').onchange = renderProjects;
+    $('clearLocal').onclick = clearSession;
+    $('requestSession').onclick = async () => {
+      const project_id = $('projectSelect').value;
+      log(`Requesting ${project_id}...`);
+      const session = await request('/sessions', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({project_id})});
+      saveSession(session);
+      log(`Session ${session.id} is ${session.state}`);
+    };
+    $('startSession').onclick = async () => {
+      if (!state.session) return;
+      log('Starting hardware/demo preparation...');
+      const session = await request(`/sessions/${state.session.id}/start`, {method:'POST', headers:sessionHeaders()});
+      saveSession({...state.session, ...session});
+      log(`Session ${session.id} is ${session.state}`);
+    };
+    $('endSession').onclick = async () => {
+      if (!state.session) return;
+      log('Ending session...');
+      const session = await request(`/sessions/${state.session.id}`, {method:'DELETE', headers:sessionHeaders()});
+      saveSession({...state.session, ...session});
+      log(`Session ended as ${session.state}`);
+      clearSession();
+    };
+
+    renderSession();
+    refreshAll().catch(e => log(e.message));
+    connectWs();
+  </script>
+</body>
+</html>
