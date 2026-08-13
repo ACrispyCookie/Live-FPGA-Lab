@@ -104,6 +104,7 @@ class SessionManager:
         self.thermal_guard = thermal_guard or ThermalGuard()
         self.event_bus = event_bus or EventBus()
         self.board_wiper = board_wiper or BoardWiper()
+        self._board_unavailable = False
         self._monitor_stop = threading.Event()
         self._monitor_thread: threading.Thread | None = None
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -294,15 +295,19 @@ class SessionManager:
         failed_session_id = None
         failed_session = None
         wipe_result = None
+        became_unavailable = not thermal_status.available and not self._board_unavailable
+        self._board_unavailable = not thermal_status.available
         promoted = False
         now = _now()
         with self._connect() as conn:
             active = conn.execute("SELECT id FROM sessions WHERE state IN ('starting', 'active', 'releasing') ORDER BY created_at ASC LIMIT 1").fetchone()
             if not thermal_status.available and active is not None:
                 failed_session_id = active["id"]
+        if became_unavailable:
+            wipe_result = self.board_wiper.wipe()
+            self.event_bus.publish("safety.wipe", {"thermal": thermal_status.to_dict(), "wipe": wipe_result})
         if failed_session_id is not None:
             reason = thermal_status.reason or "thermal status unavailable"
-            wipe_result = self.board_wiper.wipe()
             with self._connect() as conn:
                 conn.execute(
                     "UPDATE sessions SET state = 'failed', released_at = ?, error = ? WHERE id = ? AND state IN ('starting', 'active', 'releasing')",

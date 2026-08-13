@@ -151,6 +151,24 @@ def test_board_monitor_does_not_wipe_board_when_thermal_is_safe(tmp_path):
     assert wiper.calls == 0
 
 
+def test_board_monitor_wipes_board_on_unavailable_transition_even_without_active_session(tmp_path):
+    guard = SequenceThermalGuard([
+        ThermalStatus(False, 82.0, 75.0, "too hot", "2026-08-12T00:00:10+00:00"),
+        ThermalStatus(False, 83.0, 75.0, "still hot", "2026-08-12T00:00:20+00:00"),
+        ThermalStatus(True, 55.0, 75.0, None, "2026-08-12T00:00:30+00:00"),
+        ThermalStatus(False, 82.0, 75.0, "too hot again", "2026-08-12T00:00:40+00:00"),
+    ])
+    wiper = FakeBoardWiper()
+    _, manager = make_client(tmp_path, thermal_guard=guard, board_wiper=wiper)
+
+    manager.check_board_safety()
+    manager.check_board_safety()
+    manager.check_board_safety()
+    manager.check_board_safety()
+
+    assert wiper.calls == 2
+
+
 def test_board_monitor_keeps_queued_sessions_queued_during_thermal_lockout(tmp_path):
     guard = SequenceThermalGuard([
         ThermalStatus(True, 45.0, 75.0, None, "2026-08-12T00:00:00+00:00"),
