@@ -2,7 +2,6 @@ from fastapi.testclient import TestClient
 
 from fpga_demo_platform.api import create_app
 from fpga_demo_platform.sessions import SessionManager
-from fpga_demo_platform.web import create_web_app
 from tests.fakes import BlockingThermalGuard, FakeThermalGuard
 
 
@@ -25,18 +24,6 @@ def test_api_is_json_only_and_does_not_serve_webpage(tmp_path):
     assert response.json() == {"service": "fpga-demo-api", "status": "ok"}
     assert "Live FPGA Lab" not in response.text
 
-
-def test_static_web_app_embeds_api_base_without_api_routes():
-    client = TestClient(create_web_app(api_base="http://fpga-api.local"))
-
-    page = client.get("/")
-    assert page.status_code == 200
-    assert "Live FPGA Lab" in page.text
-    assert "n-body output" in page.text
-    assert "EventSource" in page.text
-    assert "http://fpga-api.local" in page.text
-    assert client.get("/health").json() == {"status": "ok", "service": "web"}
-    assert client.get("/api/demos").status_code == 404
 
 
 def test_api_lists_real_projects_with_runnable_capability(tmp_path):

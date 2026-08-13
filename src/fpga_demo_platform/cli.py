@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import uuid
 from pathlib import Path
 from typing import Any
 
 from fpga_demo_platform.api import app_from_paths
-from fpga_demo_platform.web import create_web_app
-from fpga_demo_platform.demos import list_demos
-from fpga_demo_platform.queue import JobQueue, job_to_dict
+from fpga_demo_platform.demos import get_demo, list_demos
+from fpga_demo_platform.runners import run_demo
 
-DEFAULT_DB = Path("state/jobs.sqlite3")
+DEFAULT_DB = Path("state/sessions.sqlite3")
 DEFAULT_RUNS = Path("runs")
 
 
@@ -20,25 +20,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--runs", type=Path, default=DEFAULT_RUNS)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("list", help="List demos")
+    sub.add_parser("list", help="List runnable demo definitions used internally by projects")
 
-    run_p = sub.add_parser("run", help="Submit and immediately run one demo")
+    run_p = sub.add_parser("run", help="Run one approved demo directly for hardware smoke testing")
     run_p.add_argument("demo_id")
     run_p.add_argument("--input", default="{}", help="JSON object payload")
 
-    sub.add_parser("worker-once", help="Run one queued job if available")
-
-    serve_p = sub.add_parser("serve", help="Start FastAPI server")
+    serve_p = sub.add_parser("serve", help="Start the FPGA API server")
     serve_p.add_argument("--host", default="127.0.0.1")
     serve_p.add_argument("--port", type=int, default=9118)
 
-    web_p = sub.add_parser("web", help="Serve only the static webpage")
-    web_p.add_argument("--host", default="127.0.0.1")
-    web_p.add_argument("--port", type=int, default=9120)
-    web_p.add_argument("--api-base", default=None, help="Base URL for the FPGA API service")
-
     args = parser.parse_args(argv)
-    queue = JobQueue(args.db, args.runs)
 
     if args.command == "list":
         for demo in list_demos():
@@ -47,27 +39,17 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "run":
         payload = _parse_json_object(args.input)
-        job = queue.submit(args.demo_id, payload, requester="cli")
-        finished = queue.run_next()
-        print(json.dumps(job_to_dict(finished or job), indent=2, sort_keys=True))
-        return 0
-
-    if args.command == "worker-once":
-        job = queue.run_next()
-        print(json.dumps(job_to_dict(job) if job else {"status": "idle"}, indent=2, sort_keys=True))
+        demo = get_demo(args.demo_id)
+        validated = demo.validate_input(payload)
+        artifact_dir = args.runs / uuid.uuid4().hex
+        result = run_demo(demo, validated, artifact_dir)
+        print(json.dumps({"demo_id": demo.id, "status": "succeeded", "result": result, "artifact_dir": str(artifact_dir)}, indent=2, sort_keys=True))
         return 0
 
     if args.command == "serve":
         import uvicorn
 
         app = app_from_paths(args.db, args.runs)
-        uvicorn.run(app, host=args.host, port=args.port)
-        return 0
-
-    if args.command == "web":
-        import uvicorn
-
-        app = create_web_app(api_base=args.api_base or "")
         uvicorn.run(app, host=args.host, port=args.port)
         return 0
 
