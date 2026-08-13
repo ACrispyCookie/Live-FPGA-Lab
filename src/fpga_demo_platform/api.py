@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
 import os
+import time
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from fpga_demo_platform.demos import list_demos
@@ -76,6 +79,26 @@ def create_app(*, queue: JobQueue) -> FastAPI:
             return job_to_dict(queue.get(job_id))
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/api/jobs/{job_id}/events")
+    def stream_job(job_id: str) -> StreamingResponse:
+        def events():
+            previous = None
+            while True:
+                try:
+                    payload = job_to_dict(queue.get(job_id))
+                except KeyError:
+                    yield "event: error\ndata: {\"error\": \"unknown job\"}\n\n"
+                    return
+                encoded = json.dumps(payload, sort_keys=True)
+                if encoded != previous:
+                    yield f"event: job\ndata: {encoded}\n\n"
+                    previous = encoded
+                if payload["status"] not in {"queued", "running"}:
+                    return
+                time.sleep(1.0)
+
+        return StreamingResponse(events(), media_type="text/event-stream")
 
     @app.post("/api/worker/run-next")
     def worker_run_next() -> dict[str, Any]:

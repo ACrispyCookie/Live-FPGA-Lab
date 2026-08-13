@@ -34,281 +34,34 @@ INDEX_HTML = """<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Live FPGA Lab</title>
   <style>
-    :root {
-      color-scheme: dark;
-      --bg:#050712; --panel:#0d1326; --panel-2:#111a33; --line:#253356;
-      --muted:#8ea0c6; --text:#eef4ff; --accent:#67e8f9; --accent-2:#a78bfa;
-      --ok:#86efac; --warn:#facc15; --danger:#fb7185; --shadow:rgba(0,0,0,.42);
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin:0; min-height:100vh; color:var(--text);
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
-      background:
-        radial-gradient(circle at 12% 0%, rgba(103,232,249,.22), transparent 32rem),
-        radial-gradient(circle at 88% 12%, rgba(167,139,250,.24), transparent 34rem),
-        linear-gradient(180deg, #070a16 0%, var(--bg) 52%, #03040a 100%);
-    }
-    body::before {
-      content:""; position:fixed; inset:0; pointer-events:none; opacity:.24;
-      background-image: linear-gradient(rgba(103,232,249,.12) 1px, transparent 1px), linear-gradient(90deg, rgba(103,232,249,.12) 1px, transparent 1px);
-      background-size:44px 44px; mask-image:linear-gradient(to bottom, black, transparent 78%);
-    }
-    main { width:min(1220px, calc(100vw - 28px)); margin:0 auto; padding:34px 0 64px; position:relative; }
-    header { display:grid; grid-template-columns:minmax(0,1.25fr) 420px; gap:22px; align-items:stretch; margin-bottom:22px; }
-    h1 { margin:0; font-size:clamp(2.6rem, 7vw, 6.8rem); letter-spacing:-.075em; line-height:.86; }
-    h2 { margin:0 0 10px; letter-spacing:-.035em; } h3 { margin:0 0 8px; }
-    p { color:var(--muted); line-height:1.62; }
-    .hero, .panel, .demo-card, .console, .control-card {
-      border:1px solid var(--line); background:linear-gradient(180deg, rgba(17,26,51,.86), rgba(8,12,25,.88));
-      border-radius:28px; box-shadow:0 24px 80px var(--shadow), inset 0 1px 0 rgba(255,255,255,.04);
-      backdrop-filter: blur(12px);
-    }
-    .hero { padding:28px; overflow:hidden; position:relative; }
-    .hero::after { content:""; position:absolute; width:360px; height:360px; right:-160px; top:-130px; border-radius:50%; background:radial-gradient(circle, rgba(103,232,249,.25), transparent 64%); }
-    .side { padding:22px; display:flex; flex-direction:column; justify-content:space-between; gap:18px; }
-    .metrics { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
-    .metric { border:1px solid #243458; border-radius:20px; padding:14px; background:#080d1bcc; }
-    .metric .label { color:var(--muted); font-size:.78rem; text-transform:uppercase; letter-spacing:.12em; }
-    .metric .value { font-size:1.55rem; font-weight:800; margin-top:6px; }
-    .pill { display:inline-flex; align-items:center; gap:8px; border:1px solid #30405f; background:#0b1226cc; border-radius:999px; padding:8px 12px; font-size:.86rem; color:var(--muted); white-space:nowrap; }
-    .pill.ok { color:var(--ok); border-color:rgba(134,239,172,.38); } .pill.bad { color:var(--danger); border-color:rgba(251,113,133,.45); } .pill.warn { color:var(--warn); border-color:rgba(250,204,21,.42); }
-    .toolbar, .chips { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
-    .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(245px, 1fr)); gap:16px; }
-    .demo-card { padding:20px; min-height:250px; display:flex; flex-direction:column; justify-content:space-between; transition:.18s transform,.18s border-color,.18s box-shadow; position:relative; overflow:hidden; }
-    .demo-card.available:hover { transform:translateY(-4px); border-color:rgba(103,232,249,.7); box-shadow:0 26px 92px rgba(103,232,249,.12); }
-    .demo-card.placeholder { opacity:.62; }
-    .demo-card::before { content:""; position:absolute; inset:0 0 auto; height:3px; background:linear-gradient(90deg,var(--accent),var(--accent-2)); opacity:.75; }
-    button, select, input {
-      font:inherit; border-radius:14px; border:1px solid #314264; background:#080d1b; color:var(--text); padding:11px 13px;
-    }
-    button { border:0; font-weight:800; color:#041018; background:linear-gradient(135deg, var(--accent), var(--ok)); cursor:pointer; box-shadow:0 10px 28px rgba(103,232,249,.18); }
-    button.secondary { color:var(--text); background:#101936; border:1px solid #33466f; box-shadow:none; }
-    button:disabled { cursor:not-allowed; filter:grayscale(1); opacity:.52; }
-    .layout { display:grid; grid-template-columns:360px minmax(0,1fr); gap:18px; align-items:start; }
-    .control-card { padding:20px; display:grid; gap:16px; }
-    label { color:var(--muted); font-size:.9rem; display:grid; gap:7px; }
-    input[type=range] { width:100%; accent-color:var(--accent); }
-    .console { padding:18px; min-height:430px; }
-    pre { margin:0; background:#030611; border:1px solid #1d2946; border-radius:18px; padding:16px; overflow:auto; color:#bed0ff; min-height:230px; max-height:52vh; }
-    .timeline { display:grid; gap:10px; margin:16px 0; }
-    .step { display:flex; gap:10px; align-items:center; color:var(--muted); }
-    .dot { width:12px; height:12px; border-radius:50%; background:#33415f; box-shadow:0 0 0 4px rgba(255,255,255,.03); }
-    .step.done .dot { background:var(--ok); } .step.active .dot { background:var(--accent); animation:pulse 1.25s infinite; } .step.failed .dot { background:var(--danger); }
-    @keyframes pulse { 50% { box-shadow:0 0 0 8px rgba(103,232,249,.13); } }
-    .spinner { display:inline-block; width:12px; height:12px; border:2px solid #ffffff55; border-top-color:var(--accent); border-radius:50%; animation:spin 1s linear infinite; vertical-align:-1px; }
-    @keyframes spin { to { transform:rotate(360deg); } }
-    #demo-page { display:none; }
-    #unavailable { display:none; margin:14px 0; padding:14px 16px; border:1px solid rgba(251,113,133,.42); color:#fecdd3; background:rgba(127,29,29,.28); border-radius:18px; }
-    @media (max-width:900px) { header, .layout { grid-template-columns:1fr; } .metrics { grid-template-columns:repeat(2,1fr); } }
+    :root{color-scheme:dark;--bg:#070a12;--panel:#0d1324;--panel2:#111a31;--line:#26344f;--text:#edf4ff;--muted:#93a4c4;--accent:#67e8f9;--ok:#86efac;--warn:#fde68a;--bad:#fb7185}
+    *{box-sizing:border-box} body{margin:0;background:radial-gradient(circle at 20% 0%,#12345c 0,transparent 34rem),linear-gradient(180deg,#070a12,#03050b);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif} 
+    main{width:min(1180px,calc(100vw - 32px));margin:auto;padding:32px 0 56px}.hero{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:18px;margin-bottom:18px}.card{background:linear-gradient(180deg,rgba(17,26,49,.92),rgba(8,12,24,.94));border:1px solid var(--line);border-radius:22px;box-shadow:0 20px 80px rgba(0,0,0,.35)}.intro{padding:26px}.status{padding:18px;display:grid;gap:12px}h1{font-size:clamp(2.4rem,7vw,5.8rem);letter-spacing:-.07em;line-height:.9;margin:0}h2,h3{letter-spacing:-.03em;margin:0 0 10px}p{color:var(--muted);line-height:1.55}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.badge{display:inline-flex;align-items:center;max-width:100%;border:1px solid #34435f;border-radius:999px;padding:6px 10px;color:var(--muted);font-size:.85rem;white-space:nowrap}.badge.ok{color:var(--ok);border-color:#2d6943}.badge.bad{color:var(--bad);border-color:#713042}.badge.warn{color:var(--warn);border-color:#765e24}.metric{display:flex;justify-content:space-between;gap:10px;border:1px solid #22304b;border-radius:14px;padding:10px 12px;background:#080d1b}.metric span:first-child{color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}.project{padding:18px;min-height:210px;display:flex;flex-direction:column;justify-content:space-between}.project.placeholder{opacity:.62}.project.live{border-color:#3b82a0}.project .meta{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}button,select,input{font:inherit;border-radius:12px;border:1px solid #31425f;background:#0a1020;color:var(--text);padding:10px 12px}button{border:0;background:linear-gradient(135deg,var(--accent),var(--ok));color:#041018;font-weight:800;cursor:pointer}button.secondary{background:#111b33;color:var(--text);border:1px solid #31425f}button:disabled{opacity:.5;filter:grayscale(1);cursor:not-allowed}.demo{display:none;grid-template-columns:360px minmax(0,1fr);gap:16px;margin-top:18px}.controls{padding:18px;display:grid;gap:14px}.viewer{min-height:610px;display:grid;grid-template-rows:auto 1fr auto;overflow:hidden}.viewer-head{padding:16px 18px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:12px;align-items:center}.canvas-wrap{position:relative;min-height:430px;background:radial-gradient(circle at 50% 45%,#102244,#02040a 66%)}canvas{width:100%;height:100%;display:block}.overlay{position:absolute;left:16px;bottom:16px;right:16px;border:1px solid #2c3b5a;background:rgba(5,9,18,.82);border-radius:14px;padding:12px;color:var(--muted)}.console{border-top:1px solid var(--line);padding:12px 18px}pre{margin:0;max-height:170px;overflow:auto;background:#030711;border:1px solid #1d2942;border-radius:12px;padding:12px;color:#c4d3ff}.timeline{display:grid;gap:8px}.step{display:flex;align-items:center;gap:8px;color:var(--muted)}.dot{width:10px;height:10px;border-radius:50%;background:#34415a}.step.active .dot{background:var(--accent);box-shadow:0 0 0 6px rgba(103,232,249,.12)}.step.done .dot{background:var(--ok)}.step.fail .dot{background:var(--bad)}label{display:grid;gap:7px;color:var(--muted)}input[type=range]{width:100%;accent-color:var(--accent)}@media(max-width:900px){.hero,.demo{grid-template-columns:1fr}.viewer{min-height:520px}.canvas-wrap{min-height:360px}}
   </style>
 </head>
 <body>
 <main>
-  <header>
-    <section class="hero">
-      <div class="toolbar" style="margin-bottom:18px"><span class="pill ok">real hardware</span><span class="pill">queued access</span><span class="pill">thermal protected</span></div>
-      <h1>Live FPGA Lab</h1>
-      <p style="max-width:680px">Launch curated portfolio demos on a real Zynq board in my homelab. Pick a project, tune safe inputs, queue a run, and watch the board state come back through the API.</p>
-    </section>
-    <aside class="side panel">
-      <div class="toolbar"><span id="thermal-pill" class="pill">Checking FPGA...</span><span id="api-pill" class="pill">API...</span></div>
-      <div class="metrics">
-        <div class="metric"><div class="label">Temperature</div><div id="temp-value" class="value">--</div></div>
-        <div class="metric"><div class="label">Queue</div><div id="queue-value" class="value">--</div></div>
-        <div class="metric"><div class="label">Last job</div><div id="last-value" class="value">--</div></div>
-        <div class="metric"><div class="label">API target</div><div id="api-value" class="value" style="font-size:.88rem; word-break:break-all">--</div></div>
-      </div>
-    </aside>
-  </header>
-
-  <section id="picker">
-    <div class="toolbar" style="justify-content:space-between; margin:18px 0">
-      <h2>Select a project</h2>
-      <button class="secondary" id="refresh">Refresh status</button>
-    </div>
-    <div id="unavailable"></div>
-    <div id="demo-grid" class="grid"></div>
+  <section class="hero">
+    <div class="intro card"><div class="row"><span class="badge ok">real FPGA</span><span class="badge">queued runs</span><span class="badge">thermal guard</span></div><h1>Live FPGA Lab</h1><p>Choose a project, reserve the board through the queue, and view the demo output in a project-specific interface.</p></div>
+    <aside class="status card"><h2>Board status</h2><div class="metric"><span>API</span><b id="api-state">checking</b></div><div class="metric"><span>Thermal</span><b id="thermal-state">--</b></div><div class="metric"><span>Queue</span><b id="queue-state">--</b></div><button class="secondary" id="refresh">Refresh</button></aside>
   </section>
-
-  <section id="demo-page">
-    <div class="toolbar" style="justify-content:space-between; margin:18px 0">
-      <button class="secondary" id="back">← Back to projects</button>
-      <span id="run-state" class="pill">Idle</span>
-    </div>
-    <div class="layout">
-      <aside class="control-card">
-        <div><h2 id="active-title">GPGPU n-body simulator</h2><p id="active-copy">Programs the Zynq PL, starts the PS UART monitor, loads n-body instructions, and executes a bounded kernel run.</p></div>
-        <label>Dataset
-          <select id="dataset"><option value="default">default</option><option value="binary-clouds">binary clouds</option><option value="rings">rings</option></select>
-        </label>
-        <label>Steps per frame <span id="steps-label" class="pill">1</span>
-          <input id="steps" type="range" min="1" max="16" value="1" />
-        </label>
-        <label>Kernel calls <span id="calls-label" class="pill">1</span>
-          <input id="kernel-calls" type="range" min="1" max="4" value="1" />
-        </label>
-        <button id="start">Start queued FPGA run</button>
-        <button class="secondary" id="status-only">Check availability</button>
-      </aside>
-      <section class="console">
-        <h2>Run console</h2>
-        <div class="timeline">
-          <div class="step" data-step="submit"><span class="dot"></span><span>Submit job</span></div>
-          <div class="step" data-step="queue"><span class="dot"></span><span>Respect queue / board lock</span></div>
-          <div class="step" data-step="program"><span class="dot"></span><span>Program PL + start PS app</span></div>
-          <div class="step" data-step="complete"><span class="dot"></span><span>Collect result artifact</span></div>
-        </div>
-        <pre id="output">Ready. Choose controls and start a queued hardware run.</pre>
-      </section>
-    </div>
+  <section id="picker"><h2 style="margin:0 0 14px">Projects</h2><div id="unavailable" class="badge bad" style="display:none;margin-bottom:14px"></div><div id="demo-grid" class="grid"></div></section>
+  <section id="demo" class="demo">
+    <aside class="controls card"><button class="secondary" id="back">← Projects</button><div><h2 id="demo-title">GPGPU n-body</h2><p id="demo-summary">Run and visualize the n-body project.</p></div><label>Dataset<select id="dataset"><option value="default">default</option><option value="binary-clouds">binary clouds</option><option value="rings">rings</option></select></label><label>Steps per kernel call <b id="steps-label">1</b><input id="steps" type="range" min="1" max="16" value="1"></label><label>Kernel calls <b id="calls-label">1</b><input id="calls" type="range" min="1" max="4" value="1"></label><button id="start">Run on FPGA</button><div class="timeline"><div class="step" data-step="submit"><span class="dot"></span>Submit</div><div class="step" data-step="queue"><span class="dot"></span>Queue lock</div><div class="step" data-step="run"><span class="dot"></span>Program + execute</div><div class="step" data-step="display"><span class="dot"></span>Display frames</div></div></aside>
+    <section class="viewer card"><div class="viewer-head"><h2>n-body output</h2><span id="job-state" class="badge">idle</span></div><div class="canvas-wrap"><canvas id="nbody"></canvas><div class="overlay" id="viewer-note">Run the demo to load FPGA output frames. Drag inside the viewer to rotate; scroll to zoom.</div></div><div class="console"><pre id="output">No run yet.</pre></div></section>
   </section>
 </main>
 <script>
-let demos = [];
-let activeJob = null;
-let activeDemo = null;
-let pollTimer = null;
-let latestThermalAvailable = false;
-const API_BASE = '__FPGA_DEMO_API_BASE__';
-
-document.getElementById('api-value').textContent = API_BASE || 'same origin /api';
-
-async function api(path, options) {
-  const res = await fetch(`${API_BASE}${path}`, options);
-  const text = await res.text();
-  let data = text ? JSON.parse(text) : null;
-  if (!res.ok) throw {status: res.status, data};
-  return data;
-}
-
-function setStep(name, cls) {
-  const el = document.querySelector(`[data-step="${name}"]`);
-  if (el) el.className = `step ${cls || ''}`;
-}
-function resetSteps() { ['submit','queue','program','complete'].forEach(s => setStep(s, '')); }
-function setOutput(value) { document.getElementById('output').textContent = typeof value === 'string' ? value : JSON.stringify(value, null, 2); }
-
-function setThermal(thermal) {
-  latestThermalAvailable = Boolean(thermal.available);
-  const pill = document.getElementById('thermal-pill');
-  const unavailable = document.getElementById('unavailable');
-  const temp = thermal.temperature_c == null ? 'unknown' : `${Number(thermal.temperature_c).toFixed(1)} °C`;
-  document.getElementById('temp-value').textContent = temp;
-  pill.textContent = thermal.available ? `FPGA available · ${temp}` : `Unavailable · ${temp}`;
-  pill.className = thermal.available ? 'pill ok' : 'pill bad';
-  unavailable.style.display = thermal.available ? 'none' : 'block';
-  unavailable.textContent = thermal.reason || 'FPGA is currently unavailable. New runs are disabled until the thermal guard clears.';
-  document.querySelectorAll('button[data-demo]').forEach(btn => { btn.disabled = !thermal.available || btn.dataset.available !== 'true'; });
-  const start = document.getElementById('start');
-  if (start) start.disabled = !thermal.available || !activeDemo;
-}
-
-function renderDemos() {
-  const grid = document.getElementById('demo-grid');
-  grid.innerHTML = '';
-  demos.forEach(demo => {
-    const card = document.createElement('article');
-    card.className = `demo-card ${demo.available ? 'available' : 'placeholder'}`;
-    card.innerHTML = `<div><div class="chips"><span class="pill ${demo.available ? 'ok' : 'warn'}">${demo.available ? 'live' : 'placeholder'}</span><span class="pill">${demo.kind}</span></div><h2>${demo.name}</h2><p>${demo.summary}</p><div class="chips"><span class="pill">${demo.board}</span></div></div>`;
-    const btn = document.createElement('button');
-    btn.textContent = demo.available ? 'Open control panel' : 'Coming soon';
-    btn.dataset.demo = demo.id;
-    btn.dataset.available = String(demo.available);
-    btn.disabled = !demo.available || !latestThermalAvailable;
-    btn.onclick = () => openDemo(demo);
-    card.appendChild(btn);
-    grid.appendChild(card);
-  });
-}
-
-function openDemo(demo) {
-  if (!demo.available) return;
-  activeDemo = demo;
-  document.getElementById('picker').style.display = 'none';
-  document.getElementById('demo-page').style.display = 'block';
-  document.getElementById('active-title').textContent = demo.name;
-  document.getElementById('run-state').textContent = 'Idle';
-  resetSteps();
-  setOutput('Ready. Choose controls and start a queued hardware run.');
-  setThermal({available: latestThermalAvailable, temperature_c: Number.parseFloat(document.getElementById('temp-value').textContent), reason: null});
-}
-
-async function refreshStatus() {
-  const status = await api('/api/status');
-  document.getElementById('api-pill').textContent = 'API online';
-  document.getElementById('api-pill').className = 'pill ok';
-  setThermal(status.thermal);
-  const jobs = status.jobs || [];
-  const queued = jobs.filter(j => j.status === 'queued').length;
-  const running = jobs.filter(j => j.status === 'running').length;
-  document.getElementById('queue-value').textContent = running ? 'running' : String(queued);
-  document.getElementById('last-value').textContent = jobs[0]?.status || '--';
-  return status;
-}
-
-async function load() {
-  demos = await api('/api/demos');
-  renderDemos();
-  await refreshStatus();
-  renderDemos();
-  setInterval(() => refreshStatus().catch(showApiError), 8000);
-}
-function showApiError(err) {
-  document.getElementById('api-pill').textContent = 'API offline';
-  document.getElementById('api-pill').className = 'pill bad';
-  setOutput(err.data || err);
-}
-
-function currentPayload() {
-  return {
-    steps_per_frame: Number(document.getElementById('steps').value),
-    kernel_calls: Number(document.getElementById('kernel-calls').value),
-    dataset: document.getElementById('dataset').value
-  };
-}
-
-async function startRun() {
-  const state = document.getElementById('run-state');
-  resetSteps(); setStep('submit', 'active');
-  state.innerHTML = '<span class="spinner"></span> submitting';
-  setOutput({input: currentPayload(), message: 'Submitting queued hardware job...'});
-  try {
-    activeJob = await api(`/api/demos/${activeDemo.id}/run`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({input:currentPayload()})});
-    setStep('submit', 'done'); setStep('queue', 'active');
-    state.innerHTML = '<span class="spinner"></span> queued';
-    setOutput(activeJob);
-    const worker = await api('/api/worker/run-next', {method:'POST'});
-    if (worker.status === 'idle') setOutput({job: activeJob, worker});
-    setStep('queue', 'done'); setStep('program', 'active');
-    pollJob(activeJob.id);
-  } catch (err) {
-    state.textContent = err.status === 503 ? 'Unavailable' : 'Error';
-    setStep('submit', 'failed'); setOutput(err.data || err); await refreshStatus().catch(()=>{});
-  }
-}
-
-async function pollJob(id) {
-  clearTimeout(pollTimer);
-  try {
-    const job = await api(`/api/jobs/${id}`);
-    setOutput(job);
-    document.getElementById('run-state').textContent = job.status;
-    if (job.status === 'running') { setStep('queue','done'); setStep('program','active'); }
-    if (job.status === 'succeeded') { setStep('program','done'); setStep('complete','done'); }
-    if (job.status === 'failed' || job.status === 'cancelled') { setStep('program','failed'); setStep('complete','failed'); }
-    if (['queued','running'].includes(job.status)) pollTimer = setTimeout(() => pollJob(id), 1500);
-    await refreshStatus();
-  } catch (err) { showApiError(err); }
-}
-
-document.getElementById('steps').oninput = e => document.getElementById('steps-label').textContent = e.target.value;
-document.getElementById('kernel-calls').oninput = e => document.getElementById('calls-label').textContent = e.target.value;
-document.getElementById('start').onclick = startRun;
-document.getElementById('status-only').onclick = () => refreshStatus().then(setOutput).catch(showApiError);
-document.getElementById('refresh').onclick = () => refreshStatus().then(renderDemos).catch(showApiError);
-document.getElementById('back').onclick = () => { document.getElementById('demo-page').style.display='none'; document.getElementById('picker').style.display='block'; activeDemo=null; };
-load().catch(showApiError);
+const API_BASE='__FPGA_DEMO_API_BASE__';let demos=[],activeDemo=null,thermalOk=false,eventSource=null;let frames=[],frameIndex=0,angleX=.55,angleY=.65,zoom=1,drag=null;
+const $=id=>document.getElementById(id);function api(path,opt){return fetch(`${API_BASE}${path}`,opt).then(async r=>{const t=await r.text();const d=t?JSON.parse(t):null;if(!r.ok)throw{status:r.status,data:d};return d})}function out(x){$('output').textContent=typeof x==='string'?x:JSON.stringify(x,null,2)}function step(name,cls=''){document.querySelector(`[data-step="${name}"]`).className=`step ${cls}`}function resetSteps(){['submit','queue','run','display'].forEach(s=>step(s))}
+async function refresh(){try{const s=await api('/api/status');$('api-state').textContent='online';thermalOk=!!s.thermal.available;const temp=s.thermal.temperature_c==null?'unknown':`${Number(s.thermal.temperature_c).toFixed(1)} °C`;$('thermal-state').textContent=thermalOk?temp:`blocked (${temp})`;$('thermal-state').style.color=thermalOk?'var(--ok)':'var(--bad)';const q=(s.jobs||[]).filter(j=>j.status==='queued').length;const running=(s.jobs||[]).some(j=>j.status==='running');$('queue-state').textContent=running?'running':String(q);$('unavailable').style.display=thermalOk?'none':'inline-flex';$('unavailable').textContent=s.thermal.reason||'FPGA unavailable';renderDemos()}catch(e){$('api-state').textContent='offline';$('api-state').style.color='var(--bad)';out(e.data||e)}}
+function renderDemos(){const g=$('demo-grid');g.innerHTML='';demos.forEach(d=>{const c=document.createElement('article');c.className=`project card ${d.available?'live':'placeholder'}`;c.innerHTML=`<div><div class="row"><span class="badge ${d.available?'ok':'warn'}">${d.available?'live':'coming soon'}</span></div><h2>${d.name}</h2><p>${d.summary}</p></div>`;const b=document.createElement('button');b.textContent=d.available?'Open demo':'Placeholder';b.disabled=!d.available||!thermalOk;b.onclick=()=>openDemo(d);c.appendChild(b);g.appendChild(c)})}
+async function load(){demos=await api('/api/demos');renderDemos();await refresh()}function openDemo(d){activeDemo=d;$('picker').style.display='none';$('demo').style.display='grid';$('demo-title').textContent=d.name;$('demo-summary').textContent=d.summary;resetSteps();drawPlaceholder()}function currentPayload(){return{dataset:$('dataset').value,steps_per_frame:Number($('steps').value),kernel_calls:Number($('calls').value)}}
+async function startRun(){if(!activeDemo)return;resetSteps();step('submit','active');$('job-state').textContent='submitting';out({input:currentPayload()});try{const job=await api(`/api/demos/${activeDemo.id}/run`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({input:currentPayload()})});step('submit','done');step('queue','active');watchJob(job.id);fetch(`${API_BASE}/api/worker/run-next`,{method:'POST'}).catch(e=>out({worker_error:String(e)}))}catch(e){step('submit','fail');$('job-state').textContent=e.status===503?'unavailable':'error';out(e.data||e);await refresh()}}
+function watchJob(id){if(eventSource)eventSource.close();eventSource=new EventSource(`${API_BASE}/api/jobs/${id}/events`);eventSource.addEventListener('job',ev=>{const job=JSON.parse(ev.data);$('job-state').textContent=job.status;out(job);if(job.status==='running'){step('queue','done');step('run','active')}if(!['queued','running'].includes(job.status)){eventSource.close();if(job.status==='succeeded'){step('run','done');step('display','active');loadFrames(job)}else{step('run','fail');}}});eventSource.onerror=()=>{$('job-state').textContent='event stream reconnecting'}}
+function loadFrames(job){const result=job.result||{};frames=result.frames||[];if(frames.length){frameIndex=0;step('display','done');$('viewer-note').textContent=`Loaded ${frames.length} FPGA frame(s) from artifact ${job.id}.`;draw()}else{$('viewer-note').textContent='Run completed, but no n-body frame artifact was returned.';step('display','fail')}}
+const canvas=$('nbody'),ctx=canvas.getContext('2d');function resize(){const r=canvas.parentElement.getBoundingClientRect();canvas.width=Math.max(1,r.width*devicePixelRatio);canvas.height=Math.max(1,r.height*devicePixelRatio);draw()}addEventListener('resize',resize);function project(p){const [x,y,z]=p;let cy=Math.cos(angleY),sy=Math.sin(angleY),cx=Math.cos(angleX),sx=Math.sin(angleX);let x1=x*cy-z*sy,z1=x*sy+z*cy,y1=y*cx-z1*sx,z2=y*sx+z1*cx+900/zoom;const s=520*zoom/Math.max(120,z2);return[canvas.width/2+x1*s,canvas.height/2-y1*s,s]}function drawPlaceholder(){frames=[{step:0,positions:Array.from({length:32},(_,i)=>[i*12-190,((i*29)&255)-128,((i*47)&255)-128])}];frameIndex=0;draw()}function draw(){ctx.clearRect(0,0,canvas.width,canvas.height);ctx.fillStyle='#030711';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.strokeStyle='rgba(103,232,249,.14)';for(let i=0;i<14;i++){ctx.beginPath();ctx.moveTo(0,i*canvas.height/14);ctx.lineTo(canvas.width,i*canvas.height/14);ctx.stroke()}const f=frames[frameIndex]||frames[0];if(!f)return;const pts=f.positions.map((p,i)=>({i,p,pr:project(p)})).sort((a,b)=>a.pr[2]-b.pr[2]);for(const o of pts){const [x,y,s]=o.pr;ctx.beginPath();ctx.fillStyle=`hsl(${(o.i*47)%360} 90% 65%)`;ctx.shadowBlur=18;ctx.shadowColor=ctx.fillStyle;ctx.arc(x,y,Math.max(4,9*s),0,Math.PI*2);ctx.fill()}ctx.shadowBlur=0;ctx.fillStyle='#dbeafe';ctx.font=`${14*devicePixelRatio}px ui-monospace,monospace`;ctx.fillText(`step ${f.step??0} · frame ${frameIndex+1}/${frames.length}`,18*devicePixelRatio,28*devicePixelRatio)}canvas.addEventListener('pointerdown',e=>{drag=[e.clientX,e.clientY,angleX,angleY];canvas.setPointerCapture(e.pointerId)});canvas.addEventListener('pointermove',e=>{if(!drag)return;angleY=drag[3]+(e.clientX-drag[0])*.008;angleX=Math.max(-1.4,Math.min(1.4,drag[2]+(e.clientY-drag[1])*.008));draw()});canvas.addEventListener('pointerup',()=>drag=null);canvas.addEventListener('wheel',e=>{e.preventDefault();zoom=Math.max(.35,Math.min(3,zoom*(e.deltaY<0?1.1:.9)));draw()},{passive:false});setInterval(()=>{if(frames.length>1){frameIndex=(frameIndex+1)%frames.length;draw()}},900);
+$('steps').oninput=e=>$('steps-label').textContent=e.target.value;$('calls').oninput=e=>$('calls-label').textContent=e.target.value;$('start').onclick=startRun;$('back').onclick=()=>{$('demo').style.display='none';$('picker').style.display='block'};$('refresh').onclick=refresh;resize();load().catch(e=>out(e.data||e));
 </script>
 </body>
 </html>

@@ -32,9 +32,30 @@ def test_static_web_app_embeds_api_base_without_api_routes():
     page = client.get("/")
     assert page.status_code == 200
     assert "Live FPGA Lab" in page.text
+    assert "n-body output" in page.text
+    assert "EventSource" in page.text
     assert "http://fpga-api.local" in page.text
     assert client.get("/health").json() == {"status": "ok", "service": "web"}
     assert client.get("/api/demos").status_code == 404
+
+
+def test_job_events_stream_status_changes(tmp_path):
+    queue = JobQueue(
+        tmp_path / "jobs.sqlite3",
+        artifacts_dir=tmp_path / "runs",
+        runner=successful_runner,
+        thermal_guard=FakeThermalGuard(),
+    )
+    client = TestClient(create_app(queue=queue))
+    submitted = client.post("/api/demos/gpgpu-nbody/run", json={"input": {}}).json()
+    client.post("/api/worker/run-next")
+
+    with client.stream("GET", f"/api/jobs/{submitted['id']}/events") as response:
+        assert response.status_code == 200
+        first_chunk = next(response.iter_text())
+
+    assert "event: job" in first_chunk
+    assert '"status": "succeeded"' in first_chunk
 
 
 def test_api_lists_gpgpu_demo_and_runs_job(tmp_path):

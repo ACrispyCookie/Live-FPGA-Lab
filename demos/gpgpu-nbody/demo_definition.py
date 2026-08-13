@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import csv
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -124,6 +126,21 @@ def program_gpgpu_board(*, root: Path, artifact_dir: Path, xsdb: Path = DEFAULT_
         raise RuntimeError(f"GPGPU board programming failed with exit code {completed.returncode}")
 
 
+def parse_nbody_csv(path: Path) -> list[dict[str, Any]]:
+    frames: list[dict[str, Any]] = []
+    with path.open(newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            positions = []
+            for body in range(32):
+                positions.append([
+                    int(row.get(f"x{body}", "0") or 0),
+                    int(row.get(f"y{body}", "0") or 0),
+                    int(row.get(f"z{body}", "0") or 0),
+                ])
+            frames.append({"step": int(row.get("step", "0") or 0), "positions": positions})
+    return frames
+
+
 def run_gpgpu_nbody(
     *,
     demo: Any,
@@ -161,11 +178,23 @@ def run_gpgpu_nbody(
     (artifact_dir / "stdout.log").write_text(completed.stdout, encoding="utf-8")
     (artifact_dir / "stderr.log").write_text(completed.stderr, encoding="utf-8")
 
+    csv_path = demo_root / "programs" / "nbody-3d" / "data.csv"
+    frames: list[dict[str, Any]] = []
+    if csv_path.exists():
+        artifact_csv = artifact_dir / "data.csv"
+        shutil.copy2(csv_path, artifact_csv)
+        frames = parse_nbody_csv(artifact_csv)
+        (artifact_dir / "frames.json").write_text(json.dumps({"frames": frames}, indent=2), encoding="utf-8")
+
     result = {
         "demo": demo.id,
         "adapter": "gpgpu-fpga-run",
         "board": demo.board,
         "input": payload,
+        "frames": frames,
+        "frames_count": len(frames),
+        "artifact_files": ["command.json", "stdout.log", "stderr.log", "gpgpu-nbody.json", "summary.json"]
+        + (["data.csv", "frames.json"] if frames else []),
         "programmed": program_board,
         "returncode": completed.returncode,
         "status": "completed" if completed.returncode == 0 else "failed",
