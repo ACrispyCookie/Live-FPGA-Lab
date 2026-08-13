@@ -110,7 +110,17 @@ def create_app(*, session_manager: SessionManager) -> FastAPI:
             raise HTTPException(status_code=403, detail={"error": {"code": "not_session_owner", "message": str(exc)}}) from exc
         except ValueError as exc:
             raise HTTPException(status_code=409, detail={"error": {"code": "session_not_starting", "message": str(exc)}}) from exc
-        return session_to_dict(session, artifacts=session_manager.artifacts_for_session(session.id))
+        except RuntimeError as exc:
+            try:
+                failed = session_manager.get(session_id)
+                payload = session_to_dict(failed, artifacts=session_manager.artifacts_for_session(session_id))
+                payload["startup_logs"] = session_manager.logs_for_session(session_id)
+            except Exception:
+                payload = {"id": session_id, "startup_logs": session_manager.logs_for_session(session_id)}
+            raise HTTPException(status_code=500, detail={"error": {"code": "session_start_failed", "message": str(exc)}, "session": payload}) from exc
+        payload = session_to_dict(session, artifacts=session_manager.artifacts_for_session(session.id))
+        payload["startup_logs"] = session_manager.logs_for_session(session.id)
+        return payload
 
     @app.post("/api/sessions/{session_id}/extend")
     def extend_session(session_id: str, request: Request) -> dict[str, Any]:

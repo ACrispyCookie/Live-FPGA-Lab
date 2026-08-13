@@ -77,6 +77,10 @@ class ThermalGuard:
             raise HardwareUnavailable(status.reason or "FPGA is currently unavailable", status=status)
         return status
 
+    def stop(self) -> None:
+        if self._reader is not None:
+            self._reader.stop()
+
     def _read_status(self) -> ThermalStatus:
         checked_at = datetime.now(UTC).isoformat()
         if not self.vivado_settings.exists():

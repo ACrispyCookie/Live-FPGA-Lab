@@ -138,6 +138,9 @@
       projects: [],
       session: JSON.parse(localStorage.getItem('fpga.session') || 'null'),
       ws: null,
+      reconnectTimer: null,
+      pollTimer: null,
+      seenLogs: new Set(),
     };
 
     const $ = id => document.getElementById(id);
@@ -152,6 +155,14 @@
       const box = $('events');
       box.textContent += `${new Date().toLocaleTimeString()} ${obj.type || 'event'}\n`;
       box.scrollTop = box.scrollHeight;
+    }
+    function appendStartupLogs(session) {
+      for (const entry of (session.startup_logs || [])) {
+        const key = `${entry.phase}|${entry.stream}|${entry.message}`;
+        if (state.seenLogs.has(key)) continue;
+        state.seenLogs.add(key);
+        log(`[${entry.phase}] ${entry.message}`);
+      }
     }
     function api(path) { return `${state.apiBase}${path}`; }
     function wsUrl() {
@@ -168,14 +179,18 @@
       const text = await res.text();
       let data = null;
       try { data = text ? JSON.parse(text) : null; } catch { data = text; }
-      if (!res.ok) throw new Error(`${res.status}: ${typeof data === 'string' ? data : JSON.stringify(data)}`);
+      if (!res.ok) {
+        const err = new Error(`${res.status}: ${typeof data === 'string' ? data : JSON.stringify(data)}`);
+        err.data = data;
+        throw err;
+      }
       return data;
     }
     function saveSession(session) {
       state.session = session;
       localStorage.setItem('fpga.session', JSON.stringify(session));
       renderSession();
-      connectWs();
+      subscribeCurrentSession();
     }
     function clearSession() {
       state.session = null;
@@ -184,7 +199,7 @@
       $('demoFrame').src = 'about:blank';
       $('demoEmpty').hidden = false;
       renderSession();
-      connectWs();
+      subscribeCurrentSession();
     }
     function renderSession() {
       const s = state.session;
@@ -230,6 +245,7 @@
     }
     function connectWs() {
       if (state.ws) state.ws.close();
+      if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
       state.ws = new WebSocket(wsUrl());
       $('wsDot').className = 'dot warn';
       $('wsState').textContent = 'WebSocket connecting';
@@ -237,22 +253,38 @@
         $('wsDot').className = 'dot good';
         $('wsState').textContent = 'WebSocket connected';
         state.ws.send(JSON.stringify({type:'subscribe', channels:['board','queue','sessions']}));
-        if (state.session?.id) state.ws.send(JSON.stringify({type:'subscribe_session', session_id: state.session.id, logs:true}));
+        subscribeCurrentSession();
       };
-      state.ws.onclose = () => { $('wsDot').className = 'dot bad'; $('wsState').textContent = 'WebSocket disconnected'; };
+      state.ws.onclose = () => {
+        $('wsDot').className = 'dot bad';
+        $('wsState').textContent = 'WebSocket disconnected — polling fallback active';
+        state.reconnectTimer = setTimeout(connectWs, 3000);
+      };
       state.ws.onerror = () => { $('wsDot').className = 'dot bad'; $('wsState').textContent = 'WebSocket error'; };
       state.ws.onmessage = ev => {
         const msg = JSON.parse(ev.data);
         eventLog(msg);
         if (msg.type === 'board.status') renderStatus({board:msg.board, thermal:msg.thermal, sessions:{queued:0}});
         if (msg.type === 'queue.snapshot' || msg.type === 'queue.changed') $('queueState').textContent = `${msg.queue?.queued ?? 0} queued`;
-        if (msg.type === 'session.log') log(`[${msg.phase}] ${msg.message}`);
+        if (msg.type === 'session.log') {
+          const key = `${msg.phase}|${msg.stream}|${msg.message}`;
+          if (!state.seenLogs.has(key)) {
+            state.seenLogs.add(key);
+            log(`[${msg.phase}] ${msg.message}`);
+          }
+        }
         if (msg.type === 'session.expiring') log(`[expiring] ${msg.remaining_seconds}s left (${msg.reason})`);
         if ((msg.type === 'session.snapshot' || msg.type === 'session.updated' || msg.type === 'session.ready' || msg.type === 'session.finished') && msg.session && state.session?.id === msg.session.id) {
           saveSession({...state.session, ...msg.session, owner_token: state.session.owner_token});
         }
         if (msg.type === 'session.ready') log('Demo is ready. Loading iframe...');
       };
+    }
+
+    function subscribeCurrentSession() {
+      if (state.ws?.readyState === WebSocket.OPEN && state.session?.id) {
+        state.ws.send(JSON.stringify({type:'subscribe_session', session_id: state.session.id, logs:true}));
+      }
     }
 
     $('saveApi').onclick = () => { state.apiBase = $('apiBase').value.replace(/\/$/, ''); localStorage.setItem('fpga.apiBase', state.apiBase); connectWs(); refreshAll().catch(e => log(e.message)); };
@@ -269,9 +301,19 @@
     $('startSession').onclick = async () => {
       if (!state.session) return;
       log('Starting hardware/demo preparation...');
-      const session = await request(`/sessions/${state.session.id}/start`, {method:'POST', headers:sessionHeaders()});
-      saveSession({...state.session, ...session});
-      log(`Session ${session.id} is ${session.state}`);
+      try {
+        const session = await request(`/sessions/${state.session.id}/start`, {method:'POST', headers:sessionHeaders()});
+        appendStartupLogs(session);
+        saveSession({...state.session, ...session});
+        log(`Session ${session.id} is ${session.state}`);
+      } catch (err) {
+        const failed = err.data?.detail?.session;
+        if (failed) {
+          appendStartupLogs(failed);
+          saveSession({...state.session, ...failed, owner_token: state.session.owner_token});
+        }
+        log(`start failed: ${err.message}`);
+      }
     };
     $('endSession').onclick = async () => {
       if (!state.session) return;
@@ -285,6 +327,7 @@
     renderSession();
     refreshAll().catch(e => log(e.message));
     connectWs();
+    state.pollTimer = setInterval(() => refreshAll().catch(() => {}), 5000);
   </script>
 </body>
 </html>

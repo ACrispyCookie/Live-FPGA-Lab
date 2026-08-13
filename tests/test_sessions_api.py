@@ -112,6 +112,11 @@ def test_only_owner_can_start_extend_and_release_session(tmp_path, monkeypatch):
     assert started.status_code == 200
     assert started.json()["state"] == "active"
     assert started.json()["access"]["url"] == f"/api/sessions/{session['id']}/demo/"
+    logs = started.json()["startup_logs"]
+    assert {entry["message"] for entry in logs} >= {
+        "pausing thermal reader while programming uses JTAG",
+        "fpga-demo: programmed PL",
+    }
 
     assert client.post(f"/api/sessions/{session['id']}/extend").status_code == 403
     assert client.delete(f"/api/sessions/{session['id']}").status_code == 403

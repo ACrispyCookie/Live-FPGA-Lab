@@ -107,6 +107,7 @@ class SessionManager:
         self.event_bus = event_bus or EventBus()
         self.board_wiper = board_wiper or BoardWiper()
         self._runtimes: dict[str, dict[str, Any]] = {}
+        self._logs: dict[str, list[dict[str, Any]]] = {}
         self._expiry_warned: dict[str, set[int]] = {}
         self._board_unavailable = False
         self._monitor_stop = threading.Event()
@@ -277,10 +278,15 @@ class SessionManager:
         artifact_dir = Path(session.artifact_dir or self.artifacts_dir / session_id)
 
         def emit_log(phase: str, stream: str, message: str) -> None:
+            self._logs.setdefault(session_id, []).append({"phase": phase, "stream": stream, "message": message})
             self.event_bus.publish("session.log", {"session_id": session_id, "phase": phase, "stream": stream, "message": message})
 
         self.event_bus.publish("session.starting", {"session": session_to_dict(session)})
         try:
+            emit_log("program_board", "stdout", "pausing thermal reader while programming uses JTAG")
+            stop_thermal = getattr(self.thermal_guard, "stop", None)
+            if stop_thermal is not None:
+                stop_thermal()
             runtime = start_demo_session(demo, session_id=session_id, artifact_dir=artifact_dir, emit_log=emit_log)
             self._runtimes[session_id] = runtime
             access_url = str(runtime.get("access_url") or f"/api/sessions/{session_id}/demo/")
@@ -304,6 +310,9 @@ class SessionManager:
         if session.state != "active" or session_id not in self._runtimes:
             raise ValueError("session demo is not active")
         return self._runtimes[session_id]
+
+    def logs_for_session(self, session_id: str) -> list[dict[str, Any]]:
+        return list(self._logs.get(session_id, []))
 
     def _cleanup_runtime(self, session_id: str) -> None:
         runtime = self._runtimes.pop(session_id, None)
