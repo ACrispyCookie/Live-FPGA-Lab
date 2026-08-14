@@ -157,7 +157,7 @@ def test_session_request_rejects_unknown_fields_and_project_ids(tmp_path):
     assert response.status_code == 422
 
 
-def test_no_explicit_start_endpoint_and_owner_can_extend_release_session(tmp_path, monkeypatch):
+def test_no_explicit_start_or_rest_extend_endpoint_and_owner_can_release_session(tmp_path, monkeypatch):
     import fpga_demo_platform.sessions as sessions_module
 
     monkeypatch.setattr(sessions_module, "start_demo_session", fake_start_demo_session)
@@ -179,9 +179,33 @@ def test_no_explicit_start_endpoint_and_owner_can_extend_release_session(tmp_pat
         "fpga-demo: programmed PL",
     }
 
-    assert client.post(f"/api/sessions/{session['id']}/extend").status_code == 403
+    assert client.post(f"/api/sessions/{session['id']}/extend").status_code == 404
     assert client.delete(f"/api/sessions/{session['id']}").status_code == 403
     assert client.delete(f"/api/sessions/{session['id']}", headers={"x-session-token": session["owner_token"]}).status_code == 200
+
+
+def test_owner_can_extend_session_through_websocket(tmp_path, monkeypatch):
+    import fpga_demo_platform.sessions as sessions_module
+
+    monkeypatch.setattr(sessions_module, "start_demo_session", fake_start_demo_session)
+    client, _ = make_client(tmp_path)
+    session = client.post("/api/sessions", json={"project_id": "ece338-gpgpu-nbody-3d"}).json()
+    active = session
+    for _ in range(20):
+        active = client.get(f"/api/sessions/{session['id']}").json()
+        if active["state"] == "active":
+            break
+        time.sleep(0.01)
+
+    with client.websocket_connect("/api/ws") as ws:
+        assert ws.receive_json()["type"] == "hello"
+        ws.send_json({"type": "extend_session", "session_id": session["id"], "token": "wrong"})
+        assert ws.receive_json()["code"] == "not_session_owner"
+        ws.send_json({"type": "extend_session", "session_id": session["id"], "token": session["owner_token"]})
+        updated = ws.receive_json()
+        assert updated["type"] == "session.updated"
+        assert updated["extension"] == "manual"
+        assert updated["session"]["id"] == session["id"]
 
 
 def test_websocket_session_subscription_requires_owner_token(tmp_path, monkeypatch):
@@ -258,6 +282,27 @@ def test_board_monitor_sends_status_only_when_status_changes(tmp_path):
     while not subscriber.empty():
         events.append(subscriber.get_nowait())
     assert [event.type for event in events].count("board.status") == 2
+
+
+def test_expiring_event_includes_authoritative_server_expiry(tmp_path):
+    _, manager = make_client(tmp_path)
+    session = manager.request_session("ece338-gpgpu-nbody-3d", requester="user-a")
+    manager.start_session(session.id)
+    manager.request_session("ece338-gpgpu-nbody-3d", requester="user-b")
+    expires = datetime.now(UTC) + timedelta(seconds=60)
+    with manager._connect() as conn:
+        conn.execute("UPDATE sessions SET lease_expires_at = ? WHERE id = ?", (expires.isoformat(), session.id))
+    subscriber = manager.event_bus.subscribe()
+
+    manager.check_session_policy()
+
+    events = []
+    while not subscriber.empty():
+        events.append(subscriber.get_nowait())
+    expiring = next(event for event in events if event.type == "session.expiring")
+    assert expiring.payload["session_id"] == session.id
+    assert expiring.payload["remaining_seconds"] <= 60
+    assert expiring.payload["lease_expires_at"] == expires.isoformat()
 
 
 def test_websocket_disconnect_cancels_queued_session(tmp_path, monkeypatch):

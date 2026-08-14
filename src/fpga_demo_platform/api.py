@@ -112,19 +112,6 @@ def create_app(*, session_manager: SessionManager) -> FastAPI:
             raise HTTPException(status_code=403, detail={"error": {"code": "not_session_owner", "message": str(exc)}}) from exc
         return session_to_dict(session, artifacts=session_manager.artifacts_for_session(session.id))
 
-    @app.post("/api/sessions/{session_id}/extend")
-    def extend_session(session_id: str, request: Request) -> dict[str, Any]:
-        try:
-            session_manager.require_owner(session_id, _owner_token(request))
-            session = session_manager.extend(session_id)
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail={"error": {"code": "unknown_session", "message": str(exc)}}) from exc
-        except PermissionError as exc:
-            raise HTTPException(status_code=403, detail={"error": {"code": "not_session_owner", "message": str(exc)}}) from exc
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail={"error": {"code": "extension_denied", "message": str(exc)}}) from exc
-        return session_to_dict(session, artifacts=session_manager.artifacts_for_session(session.id))
-
     @app.api_route("/api/sessions/{session_id}/demo/", methods=["GET", "POST"])
     @app.api_route("/api/sessions/{session_id}/demo/{demo_path:path}", methods=["GET", "POST"])
     async def proxy_demo(session_id: str, request: Request, demo_path: str = ""):
@@ -205,6 +192,20 @@ def create_app(*, session_manager: SessionManager) -> FastAPI:
                                 payload = {"type": "session.log", "session_id": session_id, **entry}
                                 replayed_log_keys.add(_log_key(payload))
                                 await websocket.send_json(payload)
+                elif msg_type == "extend_session":
+                    session_id = str(data.get("session_id", ""))
+                    try:
+                        session_manager.require_owner(session_id, str(data.get("token") or ""))
+                        session = session_manager.extend(session_id)
+                    except KeyError:
+                        await websocket.send_json({"type": "error", "code": "unknown_session", "message": "Unknown session"})
+                    except PermissionError as exc:
+                        await websocket.send_json({"type": "error", "code": "not_session_owner", "message": str(exc)})
+                    except ValueError as exc:
+                        await websocket.send_json({"type": "error", "code": "extension_denied", "message": str(exc)})
+                    else:
+                        subscribed_sessions[session_id] = subscribed_sessions.get(session_id, False)
+                        await websocket.send_json({"type": "session.updated", "session": session_to_dict(session, artifacts=session_manager.artifacts_for_session(session.id)), "extension": "manual"})
                 elif msg_type == "unsubscribe_session":
                     subscribed_sessions.pop(str(data.get("session_id", "")), None)
                 elif msg_type == "ping":

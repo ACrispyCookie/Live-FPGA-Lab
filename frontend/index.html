@@ -269,10 +269,18 @@
       return `${remaining}s left, expires ${new Date(expiresAt).toLocaleTimeString()}`;
     }
     function expireLocallyIfNeeded() {
-      if (!state.session?.lease?.expires_at || !['starting','active'].includes(state.session.state)) return;
-      if (new Date(state.session.lease.expires_at).getTime() > Date.now()) return;
-      saveSession({...state.session, state:'expired', access:null, released_at:new Date().toISOString()});
-      log('Session lease reached zero locally; waiting for server terminal event if still connected.');
+      renderSession();
+    }
+    function applyExpiringEvent(msg) {
+      if (!state.session?.id || msg.session_id !== state.session.id) return;
+      const fallbackExpiry = msg.time ? new Date(new Date(msg.time).getTime() + Math.max(0, msg.remaining_seconds || 0) * 1000).toISOString() : state.session.lease?.expires_at;
+      const expiresAt = msg.lease_expires_at || fallbackExpiry;
+      state.session = {
+        ...state.session,
+        lease: { ...(state.session.lease || {}), expires_at: expiresAt, remaining_seconds: msg.remaining_seconds },
+      };
+      localStorage.setItem('fpga.session', JSON.stringify(state.session));
+      renderSession();
     }
     function renderStatus(payload) {
       const board = payload.board || {};
@@ -329,7 +337,10 @@
           const key = `${msg.time || ''}|${msg.phase}|${msg.stream}|${msg.message}`;
           addLog(`[${msg.phase}] ${msg.message}`, msg.time, key);
         }
-        if (msg.type === 'session.expiring') addLog(`[session] expiring: ${msg.remaining_seconds}s left (${msg.reason})`, msg.time, `${msg.sequence || ''}|session.expiring`);
+        if (msg.type === 'session.expiring') {
+          applyExpiringEvent(msg);
+          addLog(`[session] expiring: ${msg.remaining_seconds}s left (${msg.reason})`, msg.time, `${msg.sequence || ''}|session.expiring`);
+        }
         if ((msg.type === 'session.snapshot' || msg.type === 'session.updated' || msg.type === 'session.ready' || msg.type === 'session.finished') && msg.session && state.session?.id === msg.session.id) {
           saveSession({...state.session, ...msg.session, owner_token: state.session.owner_token});
         }

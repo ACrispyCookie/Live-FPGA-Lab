@@ -547,7 +547,7 @@ class SessionManager:
                 if remaining <= threshold and threshold not in self._expiry_warned.setdefault(session_id, set()):
                     self._expiry_warned[session_id].add(threshold)
                     reason = "another_user_waiting" if queued else "maximum_duration_reached"
-                    self.event_bus.publish("session.expiring", {"session_id": session_id, "remaining_seconds": remaining, "reason": reason})
+                    self.event_bus.publish("session.expiring", {"session_id": session_id, "remaining_seconds": remaining, "lease_expires_at": active["lease_expires_at"], "reason": reason})
 
     def artifacts_for_session(self, session_id: str) -> list[dict[str, Any]]:
         with self._connect() as conn:

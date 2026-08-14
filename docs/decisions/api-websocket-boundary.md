@@ -11,8 +11,8 @@ The public API is therefore:
 ```text
 Projects = what users can choose from
 Sessions = time-limited exclusive access to the FPGA for a runnable project
-REST = snapshots, session create/release/extend, artifact downloads
-WebSocket = live session/queue/board/thermal/log events
+REST = snapshots, session create/release, artifact downloads
+WebSocket = live session/queue/board/thermal/log events and owner-only lease extension
 Internal actions/jobs = private implementation details
 ```
 
@@ -293,16 +293,20 @@ This is required so users can release the board before lease expiry.
 
 ---
 
-### `POST /api/sessions/{session_id}/extend`
+### Lease extension
 
-Request a bounded lease extension.
+Manual lease extension is WebSocket-only. The owner sends:
 
-Policy:
+```json
+{"type":"extend_session","session_id":"sess_...","token":"..."}
+```
 
+Rules:
+
+- only the owner token can extend;
 - only active sessions can extend;
 - extension is denied if another session is queued;
-- total session duration is capped;
-- future implementation should verify ownership before extending.
+- extension is capped by max total duration.
 
 ---
 
@@ -495,7 +499,6 @@ POST   /api/sessions
 GET    /api/sessions
 GET    /api/sessions/{session_id}
 DELETE /api/sessions/{session_id}
-POST   /api/sessions/{session_id}/extend
 GET    /api/sessions/{session_id}/artifacts/{artifact_name}
 GET/*  /api/sessions/{session_id}/demo/
 ```
