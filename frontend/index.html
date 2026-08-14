@@ -93,7 +93,6 @@
         <div id="projectInfo" class="project" style="margin-top:10px"></div>
         <div class="row" style="margin-top:12px">
           <button id="requestSession">Request session</button>
-          <button id="startSession" class="secondary" disabled>Start / prepare</button>
         </div>
         <div class="row" style="margin-top:8px">
           <button id="endSession" class="danger" disabled>End session</button>
@@ -125,7 +124,7 @@
       <div id="demoEmpty" class="empty">
         <div>
           <h2>Demo frame will appear here</h2>
-          <p>Request a session, wait until it is starting, then press “Start / prepare”.</p>
+          <p>Request a session. When you exit the queue, hardware setup starts automatically.</p>
         </div>
       </div>
       <iframe id="demoFrame" hidden title="GPGPU nbody demo"></iframe>
@@ -206,9 +205,8 @@
       $('sessionId').textContent = s?.id || '—';
       $('sessionState').textContent = s?.state || '—';
       $('sessionQueue').textContent = s?.queue_position ?? '—';
-      $('sessionLease').textContent = s?.lease ? `${s.lease.remaining_seconds}s left, expires ${new Date(s.lease.expires_at).toLocaleTimeString()}` : '—';
+      $('sessionLease').textContent = formatLease(s);
       $('tokenState').textContent = s?.owner_token ? 'stored locally' : '—';
-      $('startSession').disabled = !(s && s.state === 'starting' && s.owner_token);
       $('endSession').disabled = !(s && ['starting','active','queued'].includes(s.state) && s.owner_token);
       if (s?.state === 'active' && s.access?.url && s.owner_token) {
         const frameUrl = new URL(s.access.url, state.apiBase.replace(/\/api\/?$/, ''));
@@ -217,6 +215,12 @@
         $('demoFrame').hidden = false;
         $('demoEmpty').hidden = true;
       }
+    }
+    function formatLease(session) {
+      if (!session?.lease?.expires_at) return '—';
+      const expiresAt = new Date(session.lease.expires_at).getTime();
+      const remaining = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
+      return `${remaining}s left, expires ${new Date(expiresAt).toLocaleTimeString()}`;
     }
     function renderStatus(payload) {
       const board = payload.board || {};
@@ -299,25 +303,18 @@
     $('requestSession').onclick = async () => {
       const project_id = $('projectSelect').value;
       log(`Requesting ${project_id}...`);
-      const session = await request('/sessions', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({project_id})});
-      saveSession(session);
-      log(`Session ${session.id} is ${session.state}`);
-    };
-    $('startSession').onclick = async () => {
-      if (!state.session) return;
-      log('Starting hardware/demo preparation...');
       try {
-        const session = await request(`/sessions/${state.session.id}/start`, {method:'POST', headers:sessionHeaders()});
+        const session = await request('/sessions', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({project_id})});
         appendStartupLogs(session);
-        saveSession({...state.session, ...session});
+        saveSession(session);
         log(`Session ${session.id} is ${session.state}`);
       } catch (err) {
         const failed = err.data?.detail?.session;
         if (failed) {
           appendStartupLogs(failed);
-          saveSession({...state.session, ...failed, owner_token: state.session.owner_token});
+          saveSession(failed);
         }
-        log(`start failed: ${err.message}`);
+        log(`session request failed: ${err.message}`);
       }
     };
     $('endSession').onclick = async () => {
@@ -332,6 +329,15 @@
     renderSession();
     refreshAll().catch(e => log(e.message));
     connectWs();
+    let lastLeasePaint = 0;
+    function paintLease(now) {
+      if (now - lastLeasePaint >= 1000) {
+        lastLeasePaint = now;
+        if (state.session?.lease) $('sessionLease').textContent = formatLease(state.session);
+      }
+      requestAnimationFrame(paintLease);
+    }
+    requestAnimationFrame(paintLease);
   </script>
 </body>
 </html>

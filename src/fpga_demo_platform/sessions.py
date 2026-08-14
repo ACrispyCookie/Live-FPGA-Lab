@@ -217,6 +217,8 @@ class SessionManager:
         self.event_bus.publish("session.created", {"session": session_to_dict(session)})
         self.event_bus.publish("queue.changed", {"queue": self.queue_summary()})
         self.event_bus.publish("board.status", self.board_status())
+        if session.state == "starting":
+            return self.start_session(session.id)
         return session
 
     def get(self, session_id: str) -> Session:
@@ -258,6 +260,7 @@ class SessionManager:
         if should_wipe:
             wipe_result = self.board_wiper.wipe()
             self.event_bus.publish("safety.wipe", {"session_id": session_id, "reason": "session_released", "wipe": wipe_result})
+        self._start_current_starting_session(ignore_errors=True)
         self.event_bus.publish("session.finished", {"session": session_to_dict(session)})
         self.event_bus.publish("queue.changed", {"queue": self.queue_summary()})
         self.event_bus.publish("board.status", self.board_status())
@@ -270,8 +273,22 @@ class SessionManager:
             raise PermissionError("session owner token is required")
         return session
 
-    def start_owned_session(self, session_id: str, owner_token: str | None) -> Session:
-        session = self.require_owner(session_id, owner_token)
+    def cancel_if_queued(self, session_id: str, *, reason: str = "owner_disconnected") -> Session | None:
+        now = _now()
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+            if row is None or row["state"] != "queued":
+                return None
+            conn.execute("UPDATE sessions SET state = 'cancelled', released_at = ?, error = ? WHERE id = ?", (now, reason, session_id))
+        session = self.get(session_id)
+        self.event_bus.publish("session.finished", {"session": session_to_dict(session)})
+        self.event_bus.publish("queue.changed", {"queue": self.queue_summary()})
+        self.event_bus.publish("board.status", self.board_status())
+        return session
+
+    def start_session(self, session_id: str) -> Session:
+        session = self.get(session_id)
         if session.state != "starting":
             raise ValueError(f"session must be starting before demo startup, not {session.state}")
         demo = get_demo(session.demo_id)
@@ -303,7 +320,7 @@ class SessionManager:
             failed = self.get(session_id)
             self.event_bus.publish("session.failed", {"session": session_to_dict(failed), "error": str(exc)})
             self.event_bus.publish("session.finished", {"session": session_to_dict(failed)})
-            raise
+            raise SessionStartFailed(session_id, str(exc)) from exc
 
     def runtime_for_session(self, session_id: str, owner_token: str | None) -> dict[str, Any]:
         session = self.require_owner(session_id, owner_token)
@@ -399,6 +416,7 @@ class SessionManager:
                     promoted = self._promote_next_locked(conn)
             if promoted:
                 self.event_bus.publish("queue.changed", {"queue": self.queue_summary()})
+                self._start_current_starting_session(ignore_errors=True)
         status = self.board_status(thermal_status=thermal_status)
         self.event_bus.publish("board.status", status)
         return status
@@ -460,6 +478,7 @@ class SessionManager:
                 session = self.get(session_id)
                 self.event_bus.publish("session.finished", {"session": session_to_dict(session)})
                 self.event_bus.publish("queue.changed", {"queue": self.queue_summary()})
+                self._start_current_starting_session(ignore_errors=True)
                 return
             for threshold in (60, 30, 10):
                 if remaining <= threshold and threshold not in self._expiry_warned.setdefault(session_id, set()):
@@ -528,6 +547,18 @@ class SessionManager:
             (_iso(now_dt), _iso(now_dt + timedelta(seconds=DEFAULT_LEASE_SECONDS)), row["id"]),
         )
         return True
+
+    def _start_current_starting_session(self, *, ignore_errors: bool = False) -> Session | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT id FROM sessions WHERE state = 'starting' ORDER BY created_at ASC LIMIT 1").fetchone()
+        if row is None:
+            return None
+        try:
+            return self.start_session(row["id"])
+        except SessionStartFailed:
+            if not ignore_errors:
+                raise
+            return self.get(row["id"])
 
     def _remove_artifact_dir(self, artifact_dir: str) -> None:
         path = Path(artifact_dir).resolve()
@@ -598,6 +629,12 @@ def _safe_artifact_name(name: str) -> str:
 
 class SessionLimitExceeded(RuntimeError):
     pass
+
+
+class SessionStartFailed(RuntimeError):
+    def __init__(self, session_id: str, message: str):
+        super().__init__(message)
+        self.session_id = session_id
 
 
 def _now() -> str:

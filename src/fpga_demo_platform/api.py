@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict
 
 from fpga_demo_platform.demos import list_projects, project_to_dict
-from fpga_demo_platform.sessions import SessionLimitExceeded, SessionManager, session_to_dict
+from fpga_demo_platform.sessions import SessionLimitExceeded, SessionManager, SessionStartFailed, session_to_dict
 from fpga_demo_platform.thermal import HardwareUnavailable
 
 
@@ -72,9 +72,19 @@ def create_app(*, session_manager: SessionManager) -> FastAPI:
             raise HTTPException(status_code=503, detail={"error": {"code": "hardware_unavailable", "message": str(exc), "thermal": exc.status.to_dict()}}) from exc
         except SessionLimitExceeded as exc:
             raise HTTPException(status_code=429, detail={"error": {"code": "session_limit", "message": str(exc)}}) from exc
+        except SessionStartFailed as exc:
+            try:
+                failed = session_manager.get(exc.session_id)
+                payload = session_to_dict(failed, artifacts=session_manager.artifacts_for_session(exc.session_id), include_owner_token=True)
+                payload["startup_logs"] = session_manager.logs_for_session(exc.session_id)
+            except Exception:
+                payload = {"id": exc.session_id, "startup_logs": session_manager.logs_for_session(exc.session_id)}
+            raise HTTPException(status_code=500, detail={"error": {"code": "session_start_failed", "message": str(exc)}, "session": payload}) from exc
         except ValueError as exc:
             raise HTTPException(status_code=422, detail={"error": {"code": "invalid_session_request", "message": str(exc)}}) from exc
-        return session_to_dict(session, artifacts=session_manager.artifacts_for_session(session.id), include_owner_token=True)
+        payload = session_to_dict(session, artifacts=session_manager.artifacts_for_session(session.id), include_owner_token=True)
+        payload["startup_logs"] = session_manager.logs_for_session(session.id)
+        return payload
 
     @app.get("/api/sessions")
     def list_sessions(limit: int = 20, state: str | None = None) -> list[dict[str, Any]]:
@@ -99,28 +109,6 @@ def create_app(*, session_manager: SessionManager) -> FastAPI:
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail={"error": {"code": "not_session_owner", "message": str(exc)}}) from exc
         return session_to_dict(session, artifacts=session_manager.artifacts_for_session(session.id))
-
-    @app.post("/api/sessions/{session_id}/start")
-    def start_session(session_id: str, request: Request) -> dict[str, Any]:
-        try:
-            session = session_manager.start_owned_session(session_id, _owner_token(request))
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail={"error": {"code": "unknown_session", "message": str(exc)}}) from exc
-        except PermissionError as exc:
-            raise HTTPException(status_code=403, detail={"error": {"code": "not_session_owner", "message": str(exc)}}) from exc
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail={"error": {"code": "session_not_starting", "message": str(exc)}}) from exc
-        except RuntimeError as exc:
-            try:
-                failed = session_manager.get(session_id)
-                payload = session_to_dict(failed, artifacts=session_manager.artifacts_for_session(session_id))
-                payload["startup_logs"] = session_manager.logs_for_session(session_id)
-            except Exception:
-                payload = {"id": session_id, "startup_logs": session_manager.logs_for_session(session_id)}
-            raise HTTPException(status_code=500, detail={"error": {"code": "session_start_failed", "message": str(exc)}, "session": payload}) from exc
-        payload = session_to_dict(session, artifacts=session_manager.artifacts_for_session(session.id))
-        payload["startup_logs"] = session_manager.logs_for_session(session.id)
-        return payload
 
     @app.post("/api/sessions/{session_id}/extend")
     def extend_session(session_id: str, request: Request) -> dict[str, Any]:
@@ -211,6 +199,8 @@ def create_app(*, session_manager: SessionManager) -> FastAPI:
                 else:
                     await websocket.send_json({"type": "error", "code": "bad_message", "message": "Unknown message type"})
         finally:
+            for session_id in list(subscribed_sessions):
+                session_manager.cancel_if_queued(session_id)
             session_manager.event_bus.unsubscribe(subscriber)
 
     return app
