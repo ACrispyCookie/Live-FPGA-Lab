@@ -35,3 +35,21 @@ def test_start_session_refuses_to_program_when_uart_missing(tmp_path, monkeypatc
 
     assert logs == [("preflight", "stderr", f"UART device {missing_uart} is not present; refusing to program board")]
     assert not (tmp_path / "artifacts" / "program-gpgpu.tcl").exists()
+
+
+def test_start_session_command_loads_imem(tmp_path, monkeypatch):
+    module = _gpgpu_module()
+    demo = get_demo("gpgpu-nbody")
+    uart = tmp_path / "ttyUSB0"
+    uart.touch()
+    monkeypatch.setattr(module, "DEFAULT_UART_PORT", str(uart))
+    monkeypatch.setattr(module, "stream_gpgpu_programming", lambda **kwargs: None)
+    monkeypatch.setattr(module, "_http_ready", lambda port: True)
+
+    runtime = module.start_session(demo=demo, session_id="sess_test", artifact_dir=tmp_path / "artifacts", emit_log=lambda *_: None)
+    command = (tmp_path / "artifacts" / "demo-command.json").read_text(encoding="utf-8")
+
+    assert runtime["access_url"] == "/api/sessions/sess_test/demo/"
+    assert "--imem" in command
+    assert "--skip-load-imem" not in command
+    runtime["process"].terminate()

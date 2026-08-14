@@ -134,7 +134,6 @@ def start_session(*, demo: Any, session_id: str, artifact_dir: Path, emit_log) -
         str(DEFAULT_BAUD),
         "--imem",
         str(demo.root / "programs" / "nbody-3d" / "nbody-3d_instructions.mem"),
-        "--skip-load-imem",
         "--http-host",
         "127.0.0.1",
         "--http-port",

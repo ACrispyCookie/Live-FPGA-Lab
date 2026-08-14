@@ -220,6 +220,7 @@ class SessionManager:
                 (session_id, project_id, demo_id, state, requester, now, starts, expires, str(artifact_dir), owner_token),
             )
         session = self.get(session_id)
+        self._record_session_log(session, "session", "stdout", f"session requested; initial state is {session.state}")
         self.event_bus.publish("session.created", {"session": session_to_dict(session)})
         self.event_bus.publish("queue.changed", {"queue": self.queue_summary()})
         self._publish_board_status(force=True)
@@ -307,6 +308,7 @@ class SessionManager:
         def emit_log(phase: str, stream: str, message: str) -> None:
             self._record_session_log(session, phase, stream, message)
 
+        emit_log("session", "stdout", "session starting; preparing exclusive FPGA lease")
         self.event_bus.publish("session.starting", {"session": session_to_dict(session)})
         try:
             emit_log("program_board", "stdout", "pausing thermal reader while programming uses JTAG")

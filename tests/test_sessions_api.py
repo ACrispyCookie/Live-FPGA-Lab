@@ -58,7 +58,7 @@ def test_create_session_returns_starting_immediately_when_board_is_free(tmp_path
     assert first.status_code == 201
     assert first.json()["state"] == "starting"
     assert first.json()["access"] is None
-    assert first.json()["startup_logs"] == []
+    assert [entry["message"] for entry in first.json()["startup_logs"]] == ["session requested; initial state is starting"]
 
 
 def test_create_session_grants_only_one_hardware_owner(tmp_path, monkeypatch):
@@ -211,10 +211,15 @@ def test_websocket_session_subscription_replays_existing_logs(tmp_path):
         assert ws.receive_json()["type"] == "hello"
         ws.send_json({"type": "subscribe_session", "session_id": session.id, "logs": True, "token": session.owner_token})
         assert ws.receive_json()["type"] == "session.snapshot"
-        log_event = ws.receive_json()
-        assert log_event["type"] == "session.log"
-        assert log_event["message"] == "pausing thermal reader while programming uses JTAG"
-        assert "time" in log_event
+        replayed = [ws.receive_json() for _ in range(4)]
+        assert [event["type"] for event in replayed] == ["session.log"] * 4
+        assert [event["message"] for event in replayed] == [
+            "session requested; initial state is starting",
+            "session starting; preparing exclusive FPGA lease",
+            "pausing thermal reader while programming uses JTAG",
+            "fpga-demo: programmed PL",
+        ]
+        assert all("time" in event for event in replayed)
 
 
 def test_startup_failure_writes_error_log_and_wipes_board(tmp_path, monkeypatch):
