@@ -121,6 +121,31 @@ def test_same_requester_cannot_hold_or_queue_multiple_sessions(tmp_path):
     assert second.json()["detail"]["error"]["code"] == "session_limit"
 
 
+def test_different_browser_clients_behind_same_ip_can_queue(tmp_path):
+    client, _ = make_client(tmp_path)
+
+    first = client.post(
+        "/api/sessions",
+        json={"project_id": "ece338-gpgpu-nbody-3d"},
+        headers={"x-forwarded-for": "198.51.100.50", "x-fpga-client-id": "browser-a"},
+    )
+    second = client.post(
+        "/api/sessions",
+        json={"project_id": "ece338-gpgpu-nbody-3d"},
+        headers={"x-forwarded-for": "198.51.100.50", "x-fpga-client-id": "browser-b"},
+    )
+    duplicate = client.post(
+        "/api/sessions",
+        json={"project_id": "ece338-gpgpu-nbody-3d"},
+        headers={"x-forwarded-for": "198.51.100.50", "x-fpga-client-id": "browser-a"},
+    )
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert second.json()["state"] == "queued"
+    assert duplicate.status_code == 429
+
+
 def test_session_request_rejects_unknown_fields_and_project_ids(tmp_path):
     client, _ = make_client(tmp_path)
 
@@ -150,6 +175,24 @@ def test_no_explicit_start_endpoint_and_owner_can_extend_release_session(tmp_pat
     assert client.delete(f"/api/sessions/{session['id']}", headers={"x-session-token": session["owner_token"]}).status_code == 200
 
 
+def test_websocket_session_subscription_requires_owner_token(tmp_path, monkeypatch):
+    import fpga_demo_platform.sessions as sessions_module
+
+    monkeypatch.setattr(sessions_module, "start_demo_session", fake_start_demo_session)
+    client, _ = make_client(tmp_path)
+    client.post("/api/sessions", json={"project_id": "ece338-gpgpu-nbody-3d"}, headers={"x-forwarded-for": "198.51.100.1"}).json()
+    second = client.post("/api/sessions", json={"project_id": "ece338-gpgpu-nbody-3d"}, headers={"x-forwarded-for": "198.51.100.2"}).json()
+
+    with client.websocket_connect("/api/ws") as ws:
+        assert ws.receive_json()["type"] == "hello"
+        ws.send_json({"type": "subscribe_session", "session_id": second["id"], "logs": True})
+        assert ws.receive_json()["code"] == "not_session_owner"
+        ws.send_json({"type": "subscribe_session", "session_id": second["id"], "logs": True, "token": "wrong"})
+        assert ws.receive_json()["code"] == "not_session_owner"
+        ws.send_json({"type": "subscribe_session", "session_id": second["id"], "logs": True, "token": second["owner_token"]})
+        assert ws.receive_json()["type"] == "session.snapshot"
+
+
 def test_websocket_disconnect_cancels_queued_session(tmp_path, monkeypatch):
     import fpga_demo_platform.sessions as sessions_module
 
@@ -161,7 +204,7 @@ def test_websocket_disconnect_cancels_queued_session(tmp_path, monkeypatch):
 
     with client.websocket_connect("/api/ws") as ws:
         assert ws.receive_json()["type"] == "hello"
-        ws.send_json({"type": "subscribe_session", "session_id": second["id"], "logs": True})
+        ws.send_json({"type": "subscribe_session", "session_id": second["id"], "logs": True, "token": second["owner_token"]})
         assert ws.receive_json()["type"] == "session.snapshot"
 
     cancelled = manager.get(second["id"])

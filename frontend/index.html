@@ -134,6 +134,7 @@
   <script>
     const state = {
       apiBase: localStorage.getItem('fpga.apiBase') || (location.protocol.startsWith('http') ? `${location.origin}/api` : 'https://fpga.njason.dev/api'),
+      clientId: localStorage.getItem('fpga.clientId') || newClientId(),
       projects: [],
       session: JSON.parse(localStorage.getItem('fpga.session') || 'null'),
       ws: null,
@@ -142,7 +143,15 @@
     };
 
     const $ = id => document.getElementById(id);
+    localStorage.setItem('fpga.clientId', state.clientId);
     $('apiBase').value = state.apiBase;
+
+    function newClientId() {
+      if (globalThis.crypto?.randomUUID) return crypto.randomUUID();
+      const bytes = new Uint8Array(16);
+      globalThis.crypto?.getRandomValues?.(bytes);
+      return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('') || `client-${Date.now()}-${Math.random()}`;
+    }
 
     function log(line) {
       const box = $('logs');
@@ -173,7 +182,7 @@
       return state.session?.owner_token ? {'x-session-token': state.session.owner_token} : {};
     }
     async function request(path, options={}) {
-      const res = await fetch(api(path), { ...options, headers: { ...(options.headers || {}) } });
+      const res = await fetch(api(path), { ...options, headers: { 'x-fpga-client-id': state.clientId, ...(options.headers || {}) } });
       const text = await res.text();
       let data = null;
       try { data = text ? JSON.parse(text) : null; } catch { data = text; }
@@ -214,9 +223,14 @@
         $('demoFrame').src = frameUrl.toString();
         $('demoFrame').hidden = false;
         $('demoEmpty').hidden = true;
+      } else {
+        $('demoFrame').hidden = true;
+        $('demoFrame').src = 'about:blank';
+        $('demoEmpty').hidden = false;
       }
     }
     function formatLease(session) {
+      if (session && ['released','expired','cancelled','failed'].includes(session.state)) return session.state;
       if (!session?.lease?.expires_at) return '—';
       const expiresAt = new Date(session.lease.expires_at).getTime();
       const remaining = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
@@ -227,7 +241,7 @@
       const thermal = payload.thermal || {};
       $('boardState').textContent = `${board.mode || 'unknown'} ${board.locked_by_session_id ? `(${board.locked_by_session_id})` : ''}`;
       $('thermalState').textContent = thermal.available ? `${thermal.temperature_c}°C / max ${thermal.max_temperature_c}°C` : (thermal.reason || 'unavailable');
-      $('queueState').textContent = `${payload.sessions?.queued ?? 0} queued`;
+      if (payload.sessions) $('queueState').textContent = `${payload.sessions.queued ?? 0} queued`;
     }
     function renderProjects() {
       const runnable = state.projects.filter(p => p.runnable);
@@ -271,7 +285,7 @@
       state.ws.onmessage = ev => {
         const msg = JSON.parse(ev.data);
         eventLog(msg);
-        if (msg.type === 'board.status') renderStatus({board:msg.board, thermal:msg.thermal, sessions:{queued:0}});
+        if (msg.type === 'board.status') renderStatus({board:msg.board, thermal:msg.thermal});
         if (msg.type === 'queue.snapshot' || msg.type === 'queue.changed') $('queueState').textContent = `${msg.queue?.queued ?? 0} queued`;
         if (msg.type === 'session.log') {
           const key = `${msg.phase}|${msg.stream}|${msg.message}`;
@@ -291,7 +305,8 @@
     function subscribeCurrentSession(force = false) {
       if (state.ws?.readyState === WebSocket.OPEN && state.session?.id) {
         if (!force && state.subscribedSessionId === state.session.id) return;
-        state.ws.send(JSON.stringify({type:'subscribe_session', session_id: state.session.id, logs:true}));
+        if (!state.session.owner_token) return;
+        state.ws.send(JSON.stringify({type:'subscribe_session', session_id: state.session.id, logs:true, token: state.session.owner_token}));
         state.subscribedSessionId = state.session.id;
       }
     }

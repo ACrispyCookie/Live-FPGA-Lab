@@ -183,9 +183,11 @@ def create_app(*, session_manager: SessionManager) -> FastAPI:
                     session_id = str(data.get("session_id", ""))
                     logs = bool(data.get("logs", False))
                     try:
-                        session = session_manager.get(session_id)
+                        session = session_manager.require_owner(session_id, str(data.get("token") or ""))
                     except KeyError:
                         await websocket.send_json({"type": "error", "code": "unknown_session", "message": "Unknown session"})
+                    except PermissionError as exc:
+                        await websocket.send_json({"type": "error", "code": "not_session_owner", "message": str(exc)})
                     else:
                         subscribed_sessions[session_id] = logs
                         await websocket.send_json({"type": "session.snapshot", "session": session_to_dict(session, artifacts=session_manager.artifacts_for_session(session.id))})
@@ -255,6 +257,9 @@ def _monitor_interval_seconds() -> float:
 
 
 def _requester(request: Request) -> str | None:
+    client_id = request.headers.get("x-fpga-client-id", "").strip()
+    if client_id:
+        return f"client:{client_id[:128]}"
     forwarded = request.headers.get("x-forwarded-for")
     if forwarded:
         return forwarded.split(",", 1)[0].strip()
