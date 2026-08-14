@@ -1,4 +1,5 @@
 import sqlite3
+import time
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -41,7 +42,7 @@ def test_public_api_uses_sessions_not_jobs(tmp_path):
     assert client.get("/api/status?refresh=true").status_code == 422
 
 
-def test_create_session_auto_starts_when_board_is_free(tmp_path, monkeypatch):
+def test_create_session_returns_starting_immediately_when_board_is_free(tmp_path, monkeypatch):
     import fpga_demo_platform.sessions as sessions_module
 
     monkeypatch.setattr(sessions_module, "start_demo_session", fake_start_demo_session)
@@ -50,12 +51,9 @@ def test_create_session_auto_starts_when_board_is_free(tmp_path, monkeypatch):
     first = client.post("/api/sessions", json={"project_id": "ece338-gpgpu-nbody-3d"}, headers={"x-forwarded-for": "198.51.100.1"})
 
     assert first.status_code == 201
-    assert first.json()["state"] == "active"
-    assert first.json()["access"]["url"] == f"/api/sessions/{first.json()['id']}/demo/"
-    assert {entry["message"] for entry in first.json()["startup_logs"]} >= {
-        "pausing thermal reader while programming uses JTAG",
-        "fpga-demo: programmed PL",
-    }
+    assert first.json()["state"] == "starting"
+    assert first.json()["access"] is None
+    assert first.json()["startup_logs"] == []
 
 
 def test_create_session_grants_only_one_hardware_owner(tmp_path, monkeypatch):
@@ -69,7 +67,7 @@ def test_create_session_grants_only_one_hardware_owner(tmp_path, monkeypatch):
 
     assert first.status_code == 201
     assert second.status_code == 201
-    assert first.json()["state"] == "active"
+    assert first.json()["state"] == "starting"
     assert first.json()["owner_token"]
     assert first.json()["queue_position"] is None
     assert first.json()["lease"]["remaining_seconds"] > 0
@@ -158,13 +156,19 @@ def test_no_explicit_start_endpoint_and_owner_can_extend_release_session(tmp_pat
     import fpga_demo_platform.sessions as sessions_module
 
     monkeypatch.setattr(sessions_module, "start_demo_session", fake_start_demo_session)
-    client, _ = make_client(tmp_path)
+    client, manager = make_client(tmp_path)
     session = client.post("/api/sessions", json={"project_id": "ece338-gpgpu-nbody-3d"}).json()
+    active = session
+    for _ in range(20):
+        active = client.get(f"/api/sessions/{session['id']}").json()
+        if active["state"] == "active":
+            break
+        time.sleep(0.01)
 
     assert client.post(f"/api/sessions/{session['id']}/start", headers={"x-session-token": session["owner_token"]}).status_code == 404
-    assert session["state"] == "active"
-    assert session["access"]["url"] == f"/api/sessions/{session['id']}/demo/"
-    logs = session["startup_logs"]
+    assert active["state"] == "active"
+    assert active["access"]["url"] == f"/api/sessions/{session['id']}/demo/"
+    logs = manager.logs_for_session(session["id"])
     assert {entry["message"] for entry in logs} >= {
         "pausing thermal reader while programming uses JTAG",
         "fpga-demo: programmed PL",
@@ -191,6 +195,39 @@ def test_websocket_session_subscription_requires_owner_token(tmp_path, monkeypat
         assert ws.receive_json()["code"] == "not_session_owner"
         ws.send_json({"type": "subscribe_session", "session_id": second["id"], "logs": True, "token": second["owner_token"]})
         assert ws.receive_json()["type"] == "session.snapshot"
+
+
+def test_websocket_session_subscription_replays_existing_logs(tmp_path):
+    client, manager = make_client(tmp_path)
+    session = manager.request_session("ece338-gpgpu-nbody-3d", requester="user-a")
+    manager.start_session(session.id)
+
+    with client.websocket_connect("/api/ws") as ws:
+        assert ws.receive_json()["type"] == "hello"
+        ws.send_json({"type": "subscribe_session", "session_id": session.id, "logs": True, "token": session.owner_token})
+        assert ws.receive_json()["type"] == "session.snapshot"
+        log_event = ws.receive_json()
+        assert log_event["type"] == "session.log"
+        assert log_event["message"] == "pausing thermal reader while programming uses JTAG"
+
+
+def test_board_monitor_sends_status_only_when_status_changes(tmp_path):
+    guard = SequenceThermalGuard([
+        ThermalStatus(True, 45.0, 75.0, None, "2026-08-12T00:00:00+00:00"),
+        ThermalStatus(True, 45.0, 75.0, None, "2026-08-12T00:00:10+00:00"),
+        ThermalStatus(True, 46.0, 75.0, None, "2026-08-12T00:00:20+00:00"),
+    ])
+    _, manager = make_client(tmp_path, thermal_guard=guard)
+    subscriber = manager.event_bus.subscribe()
+
+    manager.check_board_safety()
+    manager.check_board_safety()
+    manager.check_board_safety()
+
+    events = []
+    while not subscriber.empty():
+        events.append(subscriber.get_nowait())
+    assert [event.type for event in events].count("board.status") == 2
 
 
 def test_websocket_disconnect_cancels_queued_session(tmp_path, monkeypatch):

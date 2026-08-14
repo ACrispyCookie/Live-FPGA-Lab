@@ -206,7 +206,7 @@ Active response:
     "duration_seconds": 180
   },
   "access": {
-    "url": "/projects/ece338-gpgpu-nbody-3d/session/sess_abc123/",
+    "url": "/api/sessions/sess_abc123/demo/",
     "token_required": true
   }
 }
@@ -450,7 +450,7 @@ Queued sessions are not granted if:
 The existing GPGPU web app should be integrated as a session-owned project surface:
 
 ```text
-/projects/ece338-gpgpu-nbody-3d/session/{session_id}/
+/api/sessions/{session_id}/demo/
 ```
 
 The platform controls:
@@ -497,6 +497,7 @@ GET    /api/sessions/{session_id}
 DELETE /api/sessions/{session_id}
 POST   /api/sessions/{session_id}/extend
 GET    /api/sessions/{session_id}/artifacts/{artifact_name}
+GET/*  /api/sessions/{session_id}/demo/
 ```
 
 WebSocket:

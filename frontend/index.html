@@ -55,6 +55,7 @@
     #logs { height: 260px; overflow: auto; background: #050914; border: 1px solid var(--line); border-radius: 14px; padding: 12px; }
     #events { height: 120px; overflow: auto; background: #050914; border: 1px solid var(--line); border-radius: 14px; padding: 12px; color: var(--muted); }
     iframe { width: 100%; min-height: calc(100vh - 170px); border: 1px solid var(--line); border-radius: 18px; background: #020617; }
+    .demo-panel { min-width: 0; overflow: hidden; }
     .empty { min-height: calc(100vh - 170px); display: grid; place-items: center; color: var(--muted); text-align: center; border: 1px dashed var(--line); border-radius: 18px; }
     .tiny { font-size: 12px; color: var(--muted); }
     @media (max-width: 950px) { main { grid-template-columns: 1fr; } iframe, .empty { min-height: 520px; } }
@@ -120,7 +121,7 @@
       </div>
     </section>
 
-    <section>
+    <section class="demo-panel">
       <div id="demoEmpty" class="empty">
         <div>
           <h2>Demo frame will appear here</h2>
@@ -236,6 +237,12 @@
       const remaining = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
       return `${remaining}s left, expires ${new Date(expiresAt).toLocaleTimeString()}`;
     }
+    function expireLocallyIfNeeded() {
+      if (!state.session?.lease?.expires_at || !['starting','active'].includes(state.session.state)) return;
+      if (new Date(state.session.lease.expires_at).getTime() > Date.now()) return;
+      saveSession({...state.session, state:'expired', access:null, released_at:new Date().toISOString()});
+      log('Session lease reached zero locally; waiting for server terminal event if still connected.');
+    }
     function renderStatus(payload) {
       const board = payload.board || {};
       const thermal = payload.thermal || {};
@@ -348,6 +355,7 @@
     function paintLease(now) {
       if (now - lastLeasePaint >= 1000) {
         lastLeasePaint = now;
+        expireLocallyIfNeeded();
         if (state.session?.lease) $('sessionLease').textContent = formatLease(state.session);
       }
       requestAnimationFrame(paintLease);

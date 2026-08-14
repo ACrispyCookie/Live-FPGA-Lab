@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, status
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict
@@ -63,7 +63,7 @@ def create_app(*, session_manager: SessionManager) -> FastAPI:
         return [project_to_dict(project) for project in list_projects()]
 
     @app.post("/api/sessions", status_code=status.HTTP_201_CREATED)
-    def create_session(body: SessionRequest, request: Request) -> dict[str, Any]:
+    def create_session(body: SessionRequest, request: Request, background_tasks: BackgroundTasks) -> dict[str, Any]:
         try:
             session = session_manager.request_session(body.project_id, requester=_requester(request))
         except KeyError as exc:
@@ -84,6 +84,8 @@ def create_app(*, session_manager: SessionManager) -> FastAPI:
             raise HTTPException(status_code=422, detail={"error": {"code": "invalid_session_request", "message": str(exc)}}) from exc
         payload = session_to_dict(session, artifacts=session_manager.artifacts_for_session(session.id), include_owner_token=True)
         payload["startup_logs"] = session_manager.logs_for_session(session.id)
+        if session.state == "starting":
+            background_tasks.add_task(session_manager.start_session_ignore_errors, session.id)
         return payload
 
     @app.get("/api/sessions")
@@ -156,7 +158,7 @@ def create_app(*, session_manager: SessionManager) -> FastAPI:
         subscriber = session_manager.event_bus.subscribe()
         subscribed_channels: set[str] = set()
         subscribed_sessions: dict[str, bool] = {}
-        await websocket.send_json({"type": "hello", "server_time": _now(), "capabilities": ["board", "queue", "sessions", "logs", "thermal"]})
+        await websocket.send_json({"type": "hello", "server_time": _now()})
         try:
             while True:
                 try:
@@ -191,6 +193,9 @@ def create_app(*, session_manager: SessionManager) -> FastAPI:
                     else:
                         subscribed_sessions[session_id] = logs
                         await websocket.send_json({"type": "session.snapshot", "session": session_to_dict(session, artifacts=session_manager.artifacts_for_session(session.id))})
+                        if logs:
+                            for entry in session_manager.logs_for_session(session_id):
+                                await websocket.send_json({"type": "session.log", "session_id": session_id, **entry})
                 elif msg_type == "unsubscribe_session":
                     subscribed_sessions.pop(str(data.get("session_id", "")), None)
                 elif msg_type == "ping":

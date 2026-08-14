@@ -110,6 +110,7 @@ class SessionManager:
         self._logs: dict[str, list[dict[str, Any]]] = {}
         self._expiry_warned: dict[str, set[int]] = {}
         self._board_unavailable = False
+        self._last_board_status_event_key: str | None = None
         self._monitor_stop = threading.Event()
         self._monitor_thread: threading.Thread | None = None
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -216,9 +217,7 @@ class SessionManager:
         session = self.get(session_id)
         self.event_bus.publish("session.created", {"session": session_to_dict(session)})
         self.event_bus.publish("queue.changed", {"queue": self.queue_summary()})
-        self.event_bus.publish("board.status", self.board_status())
-        if session.state == "starting":
-            return self.start_session(session.id)
+        self._publish_board_status(force=True)
         return session
 
     def get(self, session_id: str) -> Session:
@@ -263,7 +262,7 @@ class SessionManager:
         self._start_current_starting_session(ignore_errors=True)
         self.event_bus.publish("session.finished", {"session": session_to_dict(session)})
         self.event_bus.publish("queue.changed", {"queue": self.queue_summary()})
-        self.event_bus.publish("board.status", self.board_status())
+        self._publish_board_status(force=True)
         self.purge_history()
         return session
 
@@ -284,8 +283,14 @@ class SessionManager:
         session = self.get(session_id)
         self.event_bus.publish("session.finished", {"session": session_to_dict(session)})
         self.event_bus.publish("queue.changed", {"queue": self.queue_summary()})
-        self.event_bus.publish("board.status", self.board_status())
+        self._publish_board_status(force=True)
         return session
+
+    def start_session_ignore_errors(self, session_id: str) -> None:
+        try:
+            self.start_session(session_id)
+        except SessionStartFailed:
+            pass
 
     def start_session(self, session_id: str) -> Session:
         session = self.get(session_id)
@@ -418,7 +423,7 @@ class SessionManager:
                 self.event_bus.publish("queue.changed", {"queue": self.queue_summary()})
                 self._start_current_starting_session(ignore_errors=True)
         status = self.board_status(thermal_status=thermal_status)
-        self.event_bus.publish("board.status", status)
+        self._publish_board_status(status)
         return status
 
     def get_artifact(self, session_id: str, name: str) -> Artifact:
@@ -560,6 +565,13 @@ class SessionManager:
                 raise
             return self.get(row["id"])
 
+    def _publish_board_status(self, status: dict[str, Any] | None = None, *, force: bool = False) -> None:
+        payload = status or self.board_status()
+        key = json.dumps(_board_status_event_key(payload), sort_keys=True)
+        if force or key != self._last_board_status_event_key:
+            self._last_board_status_event_key = key
+            self.event_bus.publish("board.status", payload)
+
     def _remove_artifact_dir(self, artifact_dir: str) -> None:
         path = Path(artifact_dir).resolve()
         root = self.artifacts_dir.resolve()
@@ -619,6 +631,12 @@ def session_to_dict(session: Session, *, artifacts: list[dict[str, Any]] | None 
 
 def artifact_to_dict(session_id: str, artifact: Artifact) -> dict[str, Any]:
     return {"name": artifact.name, "kind": artifact.kind, "url": f"/api/sessions/{session_id}/artifacts/{artifact.name}", "content_type": artifact.content_type}
+
+
+def _board_status_event_key(status: dict[str, Any]) -> dict[str, Any]:
+    thermal = dict(status.get("thermal") or {})
+    thermal.pop("checked_at", None)
+    return {"board": status.get("board"), "thermal": thermal}
 
 
 def _safe_artifact_name(name: str) -> str:
