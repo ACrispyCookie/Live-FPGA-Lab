@@ -16,6 +16,11 @@ def fake_start_demo_session(demo, session_id, artifact_dir, emit_log):
     return {"demo_id": demo.id, "port": 8765, "access_url": f"/api/sessions/{session_id}/demo/"}
 
 
+def fake_failing_start_demo_session(demo, session_id, artifact_dir, emit_log):
+    emit_log("program_board", "stdout", "fpga-demo: connected")
+    raise RuntimeError("programming transport failed")
+
+
 @pytest.fixture(autouse=True)
 def fake_runtime_start(monkeypatch):
     import fpga_demo_platform.sessions as sessions_module
@@ -209,6 +214,26 @@ def test_websocket_session_subscription_replays_existing_logs(tmp_path):
         log_event = ws.receive_json()
         assert log_event["type"] == "session.log"
         assert log_event["message"] == "pausing thermal reader while programming uses JTAG"
+        assert "time" in log_event
+
+
+def test_startup_failure_writes_error_log_and_wipes_board(tmp_path, monkeypatch):
+    import fpga_demo_platform.sessions as sessions_module
+
+    monkeypatch.setattr(sessions_module, "start_demo_session", fake_failing_start_demo_session)
+    wiper = FakeBoardWiper()
+    _, manager = make_client(tmp_path, board_wiper=wiper)
+    session = manager.request_session("ece338-gpgpu-nbody-3d", requester="user-a")
+
+    manager.start_session_ignore_errors(session.id)
+
+    failed = manager.get(session.id)
+    logs = manager.logs_for_session(session.id)
+    assert failed.state == "failed"
+    assert failed.error == "programming transport failed"
+    assert wiper.calls == 1
+    assert any(entry["stream"] == "stderr" and "programming transport failed" in entry["message"] for entry in logs)
+    assert (tmp_path / "sessions" / session.id / "session-events.jsonl").exists()
 
 
 def test_board_monitor_sends_status_only_when_status_changes(tmp_path):

@@ -57,6 +57,7 @@ class Event:
     type: str
     payload: dict[str, Any]
     sequence: int
+    time: str
 
 
 class EventBus:
@@ -70,7 +71,7 @@ class EventBus:
     def publish(self, event_type: str, payload: dict[str, Any]) -> Event:
         with self._lock:
             self._sequence += 1
-            event = Event(event_type, payload, self._sequence)
+            event = Event(event_type, payload, self._sequence, _now())
             self._backlog.append(event)
             subscribers = list(self._subscribers)
         for subscriber in subscribers:
@@ -97,6 +98,10 @@ class EventBus:
         with self._lock:
             if subscriber in self._subscribers:
                 self._subscribers.remove(subscriber)
+
+    def backlog(self) -> list[Event]:
+        with self._lock:
+            return list(self._backlog)
 
 
 class SessionManager:
@@ -300,8 +305,7 @@ class SessionManager:
         artifact_dir = Path(session.artifact_dir or self.artifacts_dir / session_id)
 
         def emit_log(phase: str, stream: str, message: str) -> None:
-            self._logs.setdefault(session_id, []).append({"phase": phase, "stream": stream, "message": message})
-            self.event_bus.publish("session.log", {"session_id": session_id, "phase": phase, "stream": stream, "message": message})
+            self._record_session_log(session, phase, stream, message)
 
         self.event_bus.publish("session.starting", {"session": session_to_dict(session)})
         try:
@@ -319,7 +323,10 @@ class SessionManager:
             self.event_bus.publish("session.updated", {"session": session_to_dict(ready)})
             return ready
         except Exception as exc:
+            self._record_session_log_once(session, "program_board", "stderr", str(exc))
             self._cleanup_runtime(session_id)
+            wipe_result = self.board_wiper.wipe()
+            self.event_bus.publish("safety.wipe", {"session_id": session_id, "reason": "session_failed", "wipe": wipe_result})
             with self._connect() as conn:
                 conn.execute("UPDATE sessions SET state = 'failed', released_at = ?, error = ? WHERE id = ?", (_now(), str(exc), session_id))
             failed = self.get(session_id)
@@ -334,7 +341,45 @@ class SessionManager:
         return self._runtimes[session_id]
 
     def logs_for_session(self, session_id: str) -> list[dict[str, Any]]:
-        return list(self._logs.get(session_id, []))
+        try:
+            session = self.get(session_id)
+        except KeyError:
+            return list(self._logs.get(session_id, []))
+        artifact_dir = Path(session.artifact_dir or self.artifacts_dir / session_id)
+        log_path = artifact_dir / "session-events.jsonl"
+        if not log_path.exists():
+            return list(self._logs.get(session_id, []))
+        logs: list[dict[str, Any]] = []
+        for line in log_path.read_text(encoding="utf-8").splitlines():
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(item, dict):
+                logs.append(item)
+        return logs
+
+    def _record_session_log(self, session: Session, phase: str, stream: str, message: str) -> dict[str, Any]:
+        entry = {"time": _now(), "phase": phase, "stream": stream, "message": message}
+        self._logs.setdefault(session.id, []).append(entry)
+        artifact_dir = Path(session.artifact_dir or self.artifacts_dir / session.id)
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        path = artifact_dir / "session-events.jsonl"
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry, sort_keys=True) + "\n")
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO artifacts (session_id, name, kind, path, content_type) VALUES (?, ?, ?, ?, ?)",
+                (session.id, "session-events.jsonl", "log", str(path), "application/x-ndjson"),
+            )
+        self.event_bus.publish("session.log", {"session_id": session.id, **entry})
+        return entry
+
+    def _record_session_log_once(self, session: Session, phase: str, stream: str, message: str) -> dict[str, Any] | None:
+        for entry in self.logs_for_session(session.id):
+            if entry.get("stream") == stream and entry.get("message") == message:
+                return None
+        return self._record_session_log(session, phase, stream, message)
 
     def _cleanup_runtime(self, session_id: str) -> None:
         runtime = self._runtimes.pop(session_id, None)
@@ -343,7 +388,10 @@ class SessionManager:
         try:
             stop_demo_session(get_demo(str(runtime.get("demo_id") or "")), runtime)
         except Exception as exc:
-            self.event_bus.publish("session.log", {"session_id": session_id, "phase": "cleanup", "stream": "stderr", "message": str(exc)})
+            try:
+                self._record_session_log(self.get(session_id), "cleanup", "stderr", str(exc))
+            except KeyError:
+                self.event_bus.publish("session.log", {"session_id": session_id, "time": _now(), "phase": "cleanup", "stream": "stderr", "message": str(exc)})
 
     def extend(self, session_id: str) -> Session:
         with self._connect() as conn:
@@ -391,6 +439,7 @@ class SessionManager:
         failed_session_id = None
         failed_session = None
         wipe_result = None
+        wiped = False
         became_unavailable = not thermal_status.available and not self._board_unavailable
         self._board_unavailable = not thermal_status.available
         promoted = False
@@ -401,9 +450,16 @@ class SessionManager:
                 failed_session_id = active["id"]
         if became_unavailable:
             wipe_result = self.board_wiper.wipe()
+            wiped = True
             self.event_bus.publish("safety.wipe", {"thermal": thermal_status.to_dict(), "wipe": wipe_result})
         if failed_session_id is not None:
             reason = thermal_status.reason or "thermal status unavailable"
+            failed_session_before_update = self.get(failed_session_id)
+            self._record_session_log(failed_session_before_update, "safety", "stderr", f"thermal lockout: {reason}")
+            if not wiped:
+                wipe_result = self.board_wiper.wipe()
+                wiped = True
+                self.event_bus.publish("safety.wipe", {"session_id": failed_session_id, "reason": "thermal_lockout", "thermal": thermal_status.to_dict(), "wipe": wipe_result})
             with self._connect() as conn:
                 conn.execute(
                     "UPDATE sessions SET state = 'failed', released_at = ?, error = ? WHERE id = ? AND state IN ('starting', 'active', 'releasing')",

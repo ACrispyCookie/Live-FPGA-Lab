@@ -154,22 +154,25 @@
       return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('') || `client-${Date.now()}-${Math.random()}`;
     }
 
-    function log(line) {
+    function displayTime(value) {
+      return value ? new Date(value).toLocaleTimeString() : new Date().toLocaleTimeString();
+    }
+    function log(line, time=null) {
       const box = $('logs');
-      box.textContent += `${new Date().toLocaleTimeString()} ${line}\n`;
+      box.textContent += `${displayTime(time)} ${line}\n`;
       box.scrollTop = box.scrollHeight;
     }
     function eventLog(obj) {
       const box = $('events');
-      box.textContent += `${new Date().toLocaleTimeString()} ${obj.type || 'event'}\n`;
+      box.textContent += `${displayTime(obj.time)} ${obj.type || 'event'}\n`;
       box.scrollTop = box.scrollHeight;
     }
     function appendStartupLogs(session) {
       for (const entry of (session.startup_logs || [])) {
-        const key = `${entry.phase}|${entry.stream}|${entry.message}`;
+        const key = `${entry.time || ''}|${entry.phase}|${entry.stream}|${entry.message}`;
         if (state.seenLogs.has(key)) continue;
         state.seenLogs.add(key);
-        log(`[${entry.phase}] ${entry.message}`);
+        log(`[${entry.phase}] ${entry.message}`, entry.time);
       }
     }
     function api(path) { return `${state.apiBase}${path}`; }
@@ -295,10 +298,10 @@
         if (msg.type === 'board.status') renderStatus({board:msg.board, thermal:msg.thermal});
         if (msg.type === 'queue.snapshot' || msg.type === 'queue.changed') $('queueState').textContent = `${msg.queue?.queued ?? 0} queued`;
         if (msg.type === 'session.log') {
-          const key = `${msg.phase}|${msg.stream}|${msg.message}`;
+          const key = `${msg.time || ''}|${msg.phase}|${msg.stream}|${msg.message}`;
           if (!state.seenLogs.has(key)) {
             state.seenLogs.add(key);
-            log(`[${msg.phase}] ${msg.message}`);
+            log(`[${msg.phase}] ${msg.message}`, msg.time);
           }
         }
         if (msg.type === 'session.expiring') log(`[expiring] ${msg.remaining_seconds}s left (${msg.reason})`);

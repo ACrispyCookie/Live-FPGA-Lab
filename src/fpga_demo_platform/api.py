@@ -158,6 +158,7 @@ def create_app(*, session_manager: SessionManager) -> FastAPI:
         subscriber = session_manager.event_bus.subscribe()
         subscribed_channels: set[str] = set()
         subscribed_sessions: dict[str, bool] = {}
+        replayed_log_keys: set[tuple[str, str, str, str, str]] = set()
         await websocket.send_json({"type": "hello", "server_time": _now()})
         try:
             while True:
@@ -167,8 +168,10 @@ def create_app(*, session_manager: SessionManager) -> FastAPI:
                     return
                 if message.get("source") == "event":
                     event = message["event"]
-                    payload = {"type": event.type, "sequence": event.sequence, **event.payload}
+                    payload = _event_payload(event)
                     if _should_send_event(event.type, payload, subscribed_channels, subscribed_sessions):
+                        if event.type == "session.log" and _log_key(payload) in replayed_log_keys:
+                            continue
                         await websocket.send_json(payload)
                     continue
                 data = message["data"]
@@ -181,6 +184,10 @@ def create_app(*, session_manager: SessionManager) -> FastAPI:
                         await websocket.send_json({"type": "queue.snapshot", "queue": session_manager.queue_summary()})
                     if "board" in channels:
                         await websocket.send_json({"type": "board.status", **session_manager.board_status()})
+                    for event in session_manager.event_bus.backlog():
+                        payload = _event_payload(event)
+                        if _should_send_event(event.type, payload, subscribed_channels, subscribed_sessions):
+                            await websocket.send_json(payload)
                 elif msg_type == "subscribe_session":
                     session_id = str(data.get("session_id", ""))
                     logs = bool(data.get("logs", False))
@@ -195,7 +202,9 @@ def create_app(*, session_manager: SessionManager) -> FastAPI:
                         await websocket.send_json({"type": "session.snapshot", "session": session_to_dict(session, artifacts=session_manager.artifacts_for_session(session.id))})
                         if logs:
                             for entry in session_manager.logs_for_session(session_id):
-                                await websocket.send_json({"type": "session.log", "session_id": session_id, **entry})
+                                payload = {"type": "session.log", "session_id": session_id, **entry}
+                                replayed_log_keys.add(_log_key(payload))
+                                await websocket.send_json(payload)
                 elif msg_type == "unsubscribe_session":
                     subscribed_sessions.pop(str(data.get("session_id", "")), None)
                 elif msg_type == "ping":
@@ -249,6 +258,20 @@ def _should_send_event(event_type: str, payload: dict[str, Any], channels: set[s
             return event_type != "session.log" or sessions[session_id]
         return "sessions" in channels and event_type != "session.log"
     return False
+
+
+def _event_payload(event) -> dict[str, Any]:
+    return {"type": event.type, "sequence": event.sequence, "time": event.time, **event.payload}
+
+
+def _log_key(payload: dict[str, Any]) -> tuple[str, str, str, str, str]:
+    return (
+        str(payload.get("session_id") or ""),
+        str(payload.get("time") or ""),
+        str(payload.get("phase") or ""),
+        str(payload.get("stream") or ""),
+        str(payload.get("message") or ""),
+    )
 
 
 def _cors_origins() -> list[str]:
