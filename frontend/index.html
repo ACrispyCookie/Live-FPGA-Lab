@@ -138,8 +138,6 @@
       projects: [],
       session: JSON.parse(localStorage.getItem('fpga.session') || 'null'),
       ws: null,
-      reconnectTimer: null,
-      pollTimer: null,
       seenLogs: new Set(),
       subscribedSessionId: null,
     };
@@ -250,7 +248,6 @@
         state.ws.onclose = null;
         state.ws.close();
       }
-      if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
       state.ws = new WebSocket(wsUrl());
       $('wsDot').className = 'dot warn';
       $('wsState').textContent = 'WebSocket connecting';
@@ -263,9 +260,8 @@
       };
       state.ws.onclose = () => {
         $('wsDot').className = 'dot bad';
-        $('wsState').textContent = 'WebSocket disconnected — polling fallback active';
+        $('wsState').textContent = 'WebSocket disconnected — use Refresh or Save API to reconnect';
         state.subscribedSessionId = null;
-        state.reconnectTimer = setTimeout(connectWs, 3000);
       };
       state.ws.onerror = () => { $('wsDot').className = 'dot bad'; $('wsState').textContent = 'WebSocket error'; };
       state.ws.onmessage = ev => {
@@ -336,7 +332,6 @@
     renderSession();
     refreshAll().catch(e => log(e.message));
     connectWs();
-    state.pollTimer = setInterval(() => refreshAll().catch(() => {}), 5000);
   </script>
 </body>
 </html>
