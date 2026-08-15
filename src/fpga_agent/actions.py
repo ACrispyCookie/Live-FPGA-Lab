@@ -161,29 +161,39 @@ puts {fpga-agent: programmed PS}
 """.strip()
 
 RESET_BOARD_TCL = """
-catch {
+proc fpga_agent_reset_step {label body} {
+    puts "fpga-agent: reset step $label"
+    flush stdout
+    if {[catch {uplevel 1 $body} result]} {
+        puts "fpga-agent: reset warning $label: $result"
+        flush stdout
+    }
+}
+
+fpga_agent_reset_step processor {
     targets -set -filter {target_ctx == "@@PROCESSOR_CTX@@"}
-    stop
+    catch {stop}
     rst -processor
-    stop
+    catch {stop}
 }
-@@DAP_RESET_COMMAND@@
-catch {
-    targets -set -filter {target_ctx == "@@FPGA_CTX@@"}
-    rst -srst
-}
-catch {
+
+fpga_agent_reset_step devcfg {
     targets -set -filter {target_ctx == "@@PROCESSOR_CTX@@"}
     set ctrl [mrd -value 0xF8007000]
     mwr 0xF8007000 [expr {$ctrl & ~(1 << 30)}]
     after 100
     mwr 0xF8007000 [expr {$ctrl | (1 << 30)}]
 }
-catch {
+
+fpga_agent_reset_step fpga_srst {
     targets -set -filter {target_ctx == "@@FPGA_CTX@@"}
-    puts [fpga -state]
+    rst -srst
 }
+
+@@DAP_RESET_COMMAND@@
+
 puts {fpga-agent: reset complete}
+flush stdout
 """.strip()
 
 TELEMETRY_TCL = r"""
@@ -608,8 +618,8 @@ def _dap_reset_command(target_ctx: JTAGTargetContext) -> str:
     if not target_ctx.dap_ctx:
         return ""
 
-    return f"""catch {{
-    targets -set -filter {{target_ctx == "{target_ctx.dap_ctx}"}}
+    return f"""fpga_agent_reset_step dap {{
+    targets -set -filter {{target_ctx == \"{target_ctx.dap_ctx}\"}}
     rst -dap
 }}"""
 
