@@ -85,9 +85,9 @@ class Agent:
             logger.info(
                 "[green]│ ✓[/] device=%s fpga=%s processor=%s dap=%s",
                 device.device_id,
-                device.target_ctx.fpga_name,
-                device.target_ctx.processor_name or "none",
-                device.target_ctx.dap_id or "none",
+                device.target_ctx.fpga_ctx,
+                device.target_ctx.processor_ctx or "none",
+                device.target_ctx.dap_ctx or "none",
             )
 
         # Background tasks

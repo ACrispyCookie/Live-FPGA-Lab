@@ -73,7 +73,7 @@ class JTAGTargetContext(BaseModel):
     fpga_name: str
     processor_ctx: str | None = None
     processor_name: str | None = None
-    dap_id: str | None = None
+    dap_ctx: str | None = None
 
 
 class FPGAState(BaseModel):

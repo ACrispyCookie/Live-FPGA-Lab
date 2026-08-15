@@ -93,20 +93,18 @@ set processors {{}}
 set daps {{}}
 foreach props [targets -target-properties] {{
     if {{![dict exists $props jtag_cable_serial] ||
-         ![dict exists $props jtag_device_ctx] ||
-         ![dict exists $props name] ||
-         ![dict exists $props target_id]}} {{
+         ![dict exists $props target_ctx] ||
+         ![dict exists $props name]}} {{
         continue
     }}
     set cable_serial [dict get $props jtag_cable_serial]
-    set device_ctx [dict get $props jtag_device_ctx]
+    set target_ctx [dict get $props target_ctx]
     set name [dict get $props name]
-    set target_id [dict get $props target_id]
     if {{[is_fpga $name]}} {{
-        lappend fpgas [list $cable_serial $device_ctx $name]
+        lappend fpgas [list $cable_serial $target_ctx $name]
     }}
     if {{[is_processor $name]}} {{
-        dict lappend processors $cable_serial [list $device_ctx $name]
+        dict lappend processors $cable_serial [list $target_ctx $name]
     }}
     if {{[dict exists $props jtag_device_name]}} {{
         set device_name [dict get $props jtag_device_name]
@@ -115,8 +113,9 @@ foreach props [targets -target-properties] {{
             if {{[dict exists $props level]}} {{
                 set level [dict get $props level]
             }}
+
             if {{$level == 0 || ![dict exists $daps $cable_serial]}} {{
-                dict set daps $cable_serial $target_id
+                dict set daps $cable_serial $target_ctx
             }}
         }}
     }}
@@ -125,7 +124,7 @@ foreach fpga $fpgas {{
     lassign $fpga cable_serial fpga_ctx fpga_name
     set processor_ctx ""
     set processor_name ""
-    set dap_id ""
+    set dap_ctx ""
     if {{[dict exists $processors $cable_serial]}} {{
         set cores [dict get $processors $cable_serial]
         set selected [lindex $cores 0]
@@ -138,22 +137,20 @@ foreach fpga $fpgas {{
         lassign $selected processor_ctx processor_name
     }}
     if {{[dict exists $daps $cable_serial]}} {{
-        set dap_id [dict get $daps $cable_serial]
+        set dap_ctx [dict get $daps $cable_serial]
     }}
-    puts "{TARGET_MARKER}\\t$cable_serial\\t$fpga_ctx\\t$fpga_name\\t$processor_ctx\\t$processor_name\\t$dap_id"
-    puts "{COMMAND_DONE_MARKER}\\tok\\t"
-    flush stdout
+    puts "{TARGET_MARKER}\\t$cable_serial\\t$fpga_ctx\\t$fpga_name\\t$processor_ctx\\t$processor_name\\t$dap_ctx"
 }}
 """.strip()
 
 PROGRAM_PL_TCL = """
-targets -set @@FPGA_TARGET_ID@@
+targets -set -filter {target_ctx == "@@FPGA_CTX@@"}
 fpga -file @@BITSTREAM@@
 puts {fpga-agent: programmed PL}
 """.strip()
 
 PROGRAM_PS_TCL = """
-targets -set @@CORE_TARGET_ID@@
+targets -set -filter {target_ctx == "@@PROCESSOR_CTX@@"}
 @@RESET_PROCESSOR@@
 source @@PS7_INIT_TCL@@
 ps7_init
@@ -165,25 +162,25 @@ puts {fpga-agent: programmed PS}
 
 RESET_BOARD_TCL = """
 catch {
-    targets -set @@CORE_TARGET_ID@@
+    targets -set -filter {target_ctx == "@@PROCESSOR_CTX@@"}
     stop
     rst -processor
     stop
 }
 @@DAP_RESET_COMMAND@@
 catch {
-    targets -set @@FPGA_TARGET_ID@@
+    targets -set -filter {target_ctx == "@@FPGA_CTX@@"}
     rst -srst
 }
 catch {
-    targets -set @@CORE_TARGET_ID@@
+    targets -set -filter {target_ctx == "@@PROCESSOR_CTX@@"}
     set ctrl [mrd -value 0xF8007000]
     mwr 0xF8007000 [expr {$ctrl & ~(1 << 30)}]
     after 100
     mwr 0xF8007000 [expr {$ctrl | (1 << 30)}]
 }
 catch {
-    targets -set @@FPGA_TARGET_ID@@
+    targets -set -filter {target_ctx == "@@FPGA_CTX@@"}
     puts [fpga -state]
 }
 puts {fpga-agent: reset complete}
@@ -389,7 +386,7 @@ class TclSession:
                 line = process.stdout.readline()
                 if line:
                     lines.append(line)
-                    if marker in line:
+                    if line.strip().startswith(marker):
                         return True, "".join(lines), ""
             if process.poll() is not None:
                 return False, "".join(lines), f"process exited with {process.returncode}"
@@ -464,7 +461,7 @@ class BoardActions:
             return error
         script = _render_template(
             PROGRAM_PL_TCL,
-            FPGA_TARGET_ID=device_state.target_ctx.fpga_ctx,
+            FPGA_CTX=device_state.target_ctx.fpga_ctx,
             BITSTREAM=_tcl_path(bitstream_path),
         )
         return self._run_xsdb(script, timeout_seconds=self.timeout_seconds, marker="fpga-agent: programmed PL")
@@ -488,7 +485,7 @@ class BoardActions:
             return error
         script = _render_template(
             PROGRAM_PS_TCL,
-            CORE_TARGET_ID=device_state.target_ctx.processor_ctx,
+            PROCESSOR_CTX=device_state.target_ctx.processor_ctx,
             RESET_PROCESSOR="rst -processor" if reset_processor else "",
             PS7_INIT_TCL=_tcl_path(ps7_init_path),
             ELF=_tcl_path(elf_path),
@@ -501,9 +498,9 @@ class BoardActions:
             return _local_error(ActionError.FPGA_INCOMPATIBLE, "board reset requires a discovered core target id")
         script = _render_template(
             RESET_BOARD_TCL,
-            CORE_TARGET_ID=device_state.target_ctx.processor_ctx,
+            PROCESSOR_CTX=device_state.target_ctx.processor_ctx,
+            FPGA_CTX=device_state.target_ctx.fpga_ctx,
             DAP_RESET_COMMAND=_dap_reset_command(device_state.target_ctx),
-            FPGA_TARGET_ID=device_state.target_ctx.fpga_ctx,
         )
         return self._run_xsdb(script, timeout_seconds=self.timeout_seconds, marker="fpga-agent: reset complete")
 
@@ -544,7 +541,7 @@ def parse_xsdb_targets(stdout: str) -> list[JTAGTargetContext]:
         parts = line.split("\t", 6)
         if len(parts) != 7:
             continue
-        _, cable_serial, fpga_ctx, fpga_name, processor_ctx, processor_name, dap_id = parts
+        _, cable_serial, fpga_ctx, fpga_name, processor_ctx, processor_name, dap_ctx = parts
         contexts.append(
             JTAGTargetContext(
                 cable_serial=cable_serial,
@@ -552,7 +549,7 @@ def parse_xsdb_targets(stdout: str) -> list[JTAGTargetContext]:
                 fpga_name=fpga_name,
                 processor_ctx=processor_ctx or None,
                 processor_name=processor_name or None,
-                dap_id=dap_id or None,
+                dap_ctx=dap_ctx or None,
             )
         )
     return contexts
@@ -608,10 +605,11 @@ def _telemetry_from_payload(payload: dict[str, Any]) -> FPGATelemetry | None:
     return FPGATelemetry(temperature_c=float(temperature), checked_at=datetime.now(UTC))
 
 def _dap_reset_command(target_ctx: JTAGTargetContext) -> str:
-    if not target_ctx.dap_id:
+    if not target_ctx.dap_ctx:
         return ""
+
     return f"""catch {{
-    targets -set {target_ctx.dap_id}
+    targets -set -filter {{target_ctx == "{target_ctx.dap_ctx}"}}
     rst -dap
 }}"""
 
