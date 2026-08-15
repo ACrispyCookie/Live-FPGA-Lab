@@ -6,6 +6,7 @@ __pycache__/
 *.egg-info/
 *.log
 *.jou
+.Xil/
 
 # generated demo outputs
 demos/*/programs/*/data.csv
