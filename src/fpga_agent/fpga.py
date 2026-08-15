@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pydantic import BaseModel, Field, computed_field
 import logging
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('fpga')
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -68,11 +68,11 @@ class FPGAFault(BaseModel):
 class JTAGTargetContext(BaseModel):
     """XSDB target identifiers needed to select one physical FPGA board."""
 
-    cable: str
-    fpga_id: str
+    cable_serial: str
+    fpga_ctx: str
     fpga_name: str
-    core_id: str | None = None
-    core_name: str | None = None
+    processor_ctx: str | None = None
+    processor_name: str | None = None
     dap_id: str | None = None
 
 
@@ -102,7 +102,7 @@ class FPGAState(BaseModel):
     
     @property
     def device_id(self) -> str:
-        return self.target_ctx.cable
+        return self.target_ctx.cable_serial
 
 
     def can_program(self) -> bool:

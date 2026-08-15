@@ -7,7 +7,7 @@ from pathlib import Path
 from .actions import BoardActions, ActionResult, ActionError
 from .fpga import register_jtag_discovery, list_fpgas, update_fpga, add_fault, clear_fault, get_fpga, FPGAState, FPGATelemetry, FaultType
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('agent')
 
 @dataclass(frozen=True)
 class AgentConfig:
@@ -94,6 +94,16 @@ class Agent:
         self._telemetry_task = None
         logger.info("FPGA agent stopped")
 
+    def list_devices(self) -> list[FPGAState]:
+        return list_fpgas()
+
+
+    def get_device(
+        self,
+        device_id: str,
+    ) -> FPGAState:
+        return get_fpga(device_id)
+
     async def program_pl(
         self,
         device_id: str,
@@ -165,7 +175,7 @@ class Agent:
 
             device = clear_fault(device,FaultType.PROGRAMMING_FAILED)
             device = clear_fault(device, FaultType.COMMUNICATION_LOST)
-            logger.info("PL programming completed on FPGA %s", device_id)
+            logger.info("PS programming completed on FPGA %s", device_id)
         return device
 
     async def reset_board(
@@ -173,20 +183,12 @@ class Agent:
         device_id: str,
     ) -> FPGAState:
         device = get_fpga(device_id)
-        if not device.can_program():
-            raise RuntimeError(f"FPGA {device_id!r} cannot currently be programmed")
         lock = self._get_device_lock(device_id)
 
         async with lock:
             # Get current state again after acquiring the lock.
             device = get_fpga(device_id)
-            if not device.can_program():
-                raise RuntimeError(f"FPGA {device_id!r} cannot currently be programmed")
-            
-            result = await asyncio.to_thread(
-                self._actions.reset_board,
-                device_state=device,
-            )
+            result = await asyncio.to_thread(self._actions.reset_board, device_state=device)
 
             # State may have changed while the tool was running.
             device = get_fpga(device_id)
@@ -220,27 +222,17 @@ class Agent:
     async def _discovery_loop(self) -> None:
         try:
             while self._running:
-                await asyncio.sleep(
-                    self.config.discovery_interval_seconds
-                )
+                await asyncio.sleep(self.config.discovery_interval_seconds)
 
-                result = await asyncio.to_thread(
-                    self._actions.discover_jtag_targets
-                )
+                result = await asyncio.to_thread(self._actions.discover_jtag_targets)
                 if not result.ok:
-                    logger.warning(
-                        "FPGA discovery failed: %s",
-                        result.stderr or result.error,
-                    )
+                    logger.warning("FPGA discovery failed: %s", result.stderr or result.error)
                     continue
 
                 targets = result.data or []
                 new = register_jtag_discovery(targets)
                 if new:
-                    logger.debug(
-                        "FPGA discovery completed: %d device(s) found",
-                        len(new),
-                    )
+                    logger.debug("FPGA discovery completed: %d device(s) found", len(new))
         except asyncio.CancelledError:
             logger.debug("FPGA discovery task stopped")
             raise
@@ -249,9 +241,7 @@ class Agent:
         try:
             while self._running:
                 await self._read_all_telemetry()
-                await asyncio.sleep(
-                    self.config.telemetry_interval_seconds
-                )
+                await asyncio.sleep(self.config.telemetry_interval_seconds)
         except asyncio.CancelledError:
             logger.debug("FPGA telemetry task stopped")
             raise
@@ -260,20 +250,11 @@ class Agent:
         devices = list_fpgas()
 
         for device in devices:
-            result = await asyncio.to_thread(
-                self._actions.read_telemetry,
-                device_state=device,
-            )
+            result = await asyncio.to_thread(self._actions.read_telemetry, device_state=device)
             if not result.ok or result.data is None:
-                logger.warning(
-                    "FPGA telemetry failed: %s",
-                    result.stderr or result.error,
-                )
+                logger.warning("FPGA telemetry failed: %s", result.stderr or result.error)
 
-            await self._handle_telemetry_update(
-                device,
-                result,
-            )
+            await self._handle_telemetry_update(device, result)
 
     async def _handle_telemetry_update(self, device: FPGAState, result: ActionResult):
         if not result.ok:
@@ -289,11 +270,25 @@ class Agent:
         device: FPGAState,
     ) -> None:
         temperature = device.telemetry.temperature_c
-        if temperature >= self.config.over_temperature_c or temperature is None:
+        if temperature is None or temperature >= self.config.over_temperature_c:
+            self._safety_reset(device)
             add_fault(device, FaultType.OVER_TEMPERATURE)
-            self._actions.reset_board(device)
         elif temperature < self.config.over_temperature_recovery_c:
             clear_fault(device, FaultType.OVER_TEMPERATURE)
+
+    async def _safety_reset(
+        self,
+        device_id: str,
+    ) -> None:
+        lock = self._get_device_lock(device_id)
+        async with lock:
+            device = get_fpga(device_id)
+            result = await asyncio.to_thread(self._actions.reset_board, device_state=device)
+            if not result.ok:
+                logger.critical("Safety reset failed on FPGA %s: %s, %s", device_id, result.error, result.stderr)
+                return
+            
+            update_fpga(device, bitstream_id=None)
 
     def _get_device_lock(
         self,

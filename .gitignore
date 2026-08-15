@@ -1,10 +1,11 @@
 state/
 runs/
-.hermes/
 __pycache__/
 .pytest_cache/
 .venv/
 *.egg-info/
+*.log
+*.jou
 
 # generated demo outputs
 demos/*/programs/*/data.csv

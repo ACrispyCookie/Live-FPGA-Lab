@@ -8,6 +8,7 @@ dependencies = [
   "uvicorn[standard]>=0.35.0",
   "pydantic>=2.11.0",
   "pyserial>=3.5",
+  "rich>=15.0.0",
 ]
 
 [project.optional-dependencies]

@@ -5,7 +5,7 @@ import os
 import re
 import subprocess
 import tempfile
-import hashlib
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,18 +14,79 @@ from enum import Enum
 
 from .fpga import FPGATelemetry, FPGAState, JTAGTargetContext
 
+logger = logging.getLogger('actions')
+
 DEFAULT_VIVADO_SETTINGS = Path(os.environ.get("FPGA_AGENT_VIVADO_SETTINGS", "~/Xilinx/2025.2/Vivado/settings64.sh")).expanduser()
 DEFAULT_XSDB = Path(os.environ.get("FPGA_AGENT_XSDB", "xsdb"))
 DEFAULT_VIVADO = os.environ.get("FPGA_AGENT_VIVADO", "vivado")
 TELEMETRY_MARKER = "FPGA_AGENT_TELEMETRY_JSON:"
-TARGETS_BEGIN = "FPGA_AGENT_TARGETS_BEGIN"
-TARGETS_END = "FPGA_AGENT_TARGETS_END"
+TARGET_MARKER = "FPGA_AGENT_TARGET"
 
 DISCOVER_JTAG_TARGETS_TCL = f"""
 connect
-puts {{{TARGETS_BEGIN}}}
-targets
-puts {{{TARGETS_END}}}
+proc is_fpga {{name}} {{
+    return [regexp -nocase {{^(xc|xck|xcu|xq|xa)}} $name]
+}}
+proc is_processor {{name}} {{
+    return [regexp -nocase {{(cortex|microblaze|risc-v|riscv)}} $name]
+}}
+set fpgas {{}}
+set processors {{}}
+set daps {{}}
+foreach props [targets -target-properties] {{
+    if {{![dict exists $props jtag_cable_serial] ||
+         ![dict exists $props jtag_device_ctx] ||
+         ![dict exists $props name] ||
+         ![dict exists $props target_id]}} {{
+        continue
+    }}
+    set cable_serial [dict get $props jtag_cable_serial]
+    set device_ctx [dict get $props jtag_device_ctx]
+    set name [dict get $props name]
+    set target_id [dict get $props target_id]
+    if {{[is_fpga $name]}} {{
+        lappend fpgas [list $cable_serial $device_ctx $name]
+    }}
+    if {{[is_processor $name]}} {{
+        dict lappend processors $cable_serial [list $device_ctx $name]
+    }}
+    if {{[dict exists $props jtag_device_name]}} {{
+        set device_name [dict get $props jtag_device_name]
+        if {{[string match -nocase "*dap*" $device_name]}} {{
+            set level 0
+            if {{[dict exists $props level]}} {{
+                set level [dict get $props level]
+            }}
+
+            if {{$level == 0 || ![dict exists $daps $cable_serial]}} {{
+                dict set daps $cable_serial $target_id
+            }}
+        }}
+    }}
+}}
+foreach fpga $fpgas {{
+    lassign $fpga cable_serial fpga_ctx fpga_name
+    set processor_ctx ""
+    set processor_name ""
+    set dap_id ""
+    if {{[dict exists $processors $cable_serial]}} {{
+        set cores [dict get $processors $cable_serial]
+        set selected [lindex $cores 0]
+
+        foreach core $cores {{
+            if {{[string match "*#0*" [lindex $core 1]]}} {{
+                set selected $core
+                break
+            }}
+        }}
+
+        lassign $selected processor_ctx processor_name
+    }}
+    if {{[dict exists $daps $cable_serial]}} {{
+        set dap_id [dict get $daps $cable_serial]
+    }}
+    puts "{TARGET_MARKER}\\t$cable_serial\\t$fpga_ctx\\t$fpga_name\\t$processor_ctx\\t$processor_name\\t$dap_id"
+}}
 exit
 """.strip()
 
@@ -119,7 +180,6 @@ class ActionError(str, Enum):
     COMMAND_ERROR = "command_error"
     TIMEOUT = "timeout"
 
-
 @dataclass(frozen=True)
 class ActionResult:
     ok: bool
@@ -142,7 +202,6 @@ class ActionResult:
             "finished_at": self.finished_at,
             "data": self.data,
         }
-
 
 class BoardActions:
     def __init__(
@@ -217,12 +276,15 @@ class BoardActions:
         return result
 
     def read_telemetry(self, *, device_state: FPGAState) -> ActionResult:
+        logging.info("reading" + VIVADO_TELEMETRY_TCL)
         script = _render_template(
             VIVADO_TELEMETRY_TCL,
             CABLE=device_state.target_ctx.cable,
             FPGA_NAME=device_state.target_ctx.fpga_name,
         )
+        logging.info("script: ")
         result = self._run_vivado(script, timeout_seconds=90)
+        logging.info(result.stdout)
         payload = parse_telemetry_payload(result.stdout) or {}
         telemetry = _telemetry_from_payload(payload)
         if not telemetry:
@@ -254,37 +316,28 @@ class BoardActions:
             timeout_seconds=timeout_seconds,
         )
 
-
 def parse_xsdb_targets(stdout: str) -> list[JTAGTargetContext]:
-    lines = _targets_section(stdout)
-    raw_targets: list[tuple[str, str, int]] = []
-    for line in lines:
-        stripped = line.strip()
-        if not stripped:
+    contexts = []
+    for line in stdout.splitlines():
+        if not line.startswith(f"{TARGET_MARKER}\t"):
             continue
-        match = re.match(r"^(\s*)(\d+)\s+(.+?)\s*$", line)
-        if match:
-            raw_targets.append((match.group(2), match.group(3).strip(), len(match.group(1))))
+        parts = line.split("\t", 6)
+        if len(parts) != 7:
+            continue
 
-    contexts: list[JTAGTargetContext] = []
-    fpga_targets = [(target_id, name, indent, index) for index, (target_id, name, indent) in enumerate(raw_targets) if _looks_like_fpga(name)]
-    for fpga_id, fpga_name, fpga_indent, fpga_index in fpga_targets:
-        cable = _nearest_preceding_target_id(raw_targets, fpga_index, fpga_indent, _looks_like_cable) or f"jtag-cable-{fpga_id}"
-        core = _nearest_following_target(raw_targets, fpga_index, _looks_like_core) or _nearest_preceding_target(raw_targets, fpga_index, _looks_like_core)
-        dap = _nearest_preceding_target_id(raw_targets, fpga_index, fpga_indent, _looks_like_dap) or _nearest_following_target_id(raw_targets, fpga_index, _looks_like_dap)
-        core_id, core_name = core if core else (None, None)
+        _, cable_serial, fpga_ctx, fpga_name, processor_ctx, processor_name, dap_id = parts
         contexts.append(
             JTAGTargetContext(
-                cable=cable,
-                fpga_id=fpga_id,
+                cable_serial=cable_serial,
+                fpga_ctx=fpga_ctx,
                 fpga_name=fpga_name,
-                core_id=core_id,
-                core_name=core_name,
-                dap_id=dap,
+                processor_ctx=processor_ctx or None,
+                processor_name=processor_name or None,
+                dap_id=dap_id or None,
             )
         )
-    return contexts
 
+    return contexts
 
 def parse_telemetry_payload(stdout: str) -> dict[str, Any] | None:
     """Parse the telemetry JSON emitted by the Tcl probe."""
@@ -300,7 +353,6 @@ def parse_telemetry_payload(stdout: str) -> dict[str, Any] | None:
         return parsed if isinstance(parsed, dict) else {"error": "telemetry payload was not an object"}
     return None
 
-
 def _run_xilinx_script(
     *,
     executable: str,
@@ -314,6 +366,7 @@ def _run_xilinx_script(
         return _local_error(ActionError.TOOL_MISSING, f"Vivado settings file not found: {vivado_settings}")
     script_path = _write_temp_script(script)
     command = ("bash", "-lc", _shell_command(vivado_settings, executable, executable_args, script_path))
+    logging.info(command)
     started_at = datetime.now(UTC).isoformat()
     try:
         completed = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout_seconds, check=False)
@@ -340,17 +393,14 @@ def _local_error(error: ActionError, message: str) -> ActionResult:
     now = datetime.now(UTC).isoformat()
     return ActionResult(False, error, (), "", message, now, now)
 
-
 def _with_data(result: ActionResult, data: Any) -> ActionResult:
     return ActionResult(result.ok, result.error, result.command, result.stdout, result.stderr, result.started_at, result.finished_at, data)
-
 
 def _require_file(path: str | Path, *, label: str) -> tuple[Path | None, ActionResult | None]:
     result = Path(path).expanduser().resolve()
     if not result.is_file():
         return None, _local_error(ActionError.FILE_MISSING, f"{label} does not exist or is not a file: {result}")
     return result, None
-
 
 def _write_temp_script(script: str) -> Path:
     handle = tempfile.NamedTemporaryFile("w", suffix=".tcl", prefix="fpga-agent-", delete=False, encoding="utf-8")
@@ -360,26 +410,25 @@ def _write_temp_script(script: str) -> Path:
     finally:
         handle.close()
 
-
 def _shell_command(vivado_settings: Path, executable: str, executable_args: tuple[str, ...], script_path: Path) -> str:
     prefix = f"source {_sh_quote(str(vivado_settings))} >/dev/null 2>&1"
     args = " ".join(_sh_quote(arg) for arg in (*executable_args, str(script_path))) if executable_args else _sh_quote(str(script_path))
     return f"{prefix} && {_sh_quote(executable)} {args}"
 
-
 def _render_template(template: str, **values: str) -> str:
+    logging.info("calling\n")
     rendered = template
+    logging.info(template)
     for key, value in values.items():
         rendered = rendered.replace("@@" + key + "@@", value)
+    logging.info(rendered)
     return rendered
-
 
 def _telemetry_from_payload(payload: dict[str, Any]) -> FPGATelemetry | None:
     temperature = payload.get("temperature_c")
     if not isinstance(temperature, int | float):
         return None
     return FPGATelemetry(temperature_c=float(temperature), checked_at=datetime.now(UTC))
-
 
 def _dap_reset_command(target_ctx: JTAGTargetContext) -> str:
     if not target_ctx.dap_id:
@@ -389,91 +438,8 @@ def _dap_reset_command(target_ctx: JTAGTargetContext) -> str:
     rst -dap
 }}"""
 
-
-def _targets_section(stdout: str) -> list[str]:
-    if TARGETS_BEGIN not in stdout:
-        return stdout.splitlines()
-    section = stdout.split(TARGETS_BEGIN, 1)[1]
-    if TARGETS_END in section:
-        section = section.split(TARGETS_END, 1)[0]
-    return section.splitlines()
-
-
-def _nearest_preceding_target_id(
-    raw_targets: list[tuple[str, str, int]],
-    index: int,
-    child_indent: int,
-    predicate,
-) -> str | None:
-    for target_id, name, indent in reversed(raw_targets[:index]):
-        if indent < child_indent and predicate(name):
-            return target_id
-    return None
-
-
-def _nearest_following_target(
-    raw_targets: list[tuple[str, str, int]],
-    index: int,
-    predicate,
-) -> tuple[str, str] | None:
-    for target_id, name, _indent in raw_targets[index + 1:]:
-        if predicate(name):
-            return target_id, name
-    return None
-
-
-def _nearest_preceding_target(
-    raw_targets: list[tuple[str, str, int]],
-    index: int,
-    predicate,
-) -> tuple[str, str] | None:
-    for target_id, name, _indent in reversed(raw_targets[:index]):
-        if predicate(name):
-            return target_id, name
-    return None
-
-
-def _nearest_following_target_id(
-    raw_targets: list[tuple[str, str, int]],
-    index: int,
-    predicate,
-) -> str | None:
-    for target_id, name, _indent in raw_targets[index + 1:]:
-        if predicate(name):
-            return target_id
-    return None
-
-
-def _looks_like_fpga(name: str) -> bool:
-    lowered = name.lower()
-    return any(token in lowered for token in ("xc7", "xck", "xcu", "zynq"))
-
-
-def _looks_like_core(name: str) -> bool:
-    lowered = name.lower()
-    return any(token in lowered for token in ("cortex", "microblaze", "risc-v", "riscv"))
-
-
-def _looks_like_dap(name: str) -> bool:
-    return "dap" in name.lower()
-
-
-def _looks_like_cable(line: str) -> bool:
-    lowered = line.lower()
-    return any(token in lowered for token in ("digilent", "jtag", "cable", "jsn"))
-
-
 def _tcl_path(path: Path) -> str:
     return str(path).replace("\\", "/")
-
-
-def _last_nonempty_line(text: str) -> str | None:
-    for line in reversed(text.splitlines()):
-        stripped = line.strip()
-        if stripped:
-            return stripped
-    return None
-
 
 def _coerce_process_text(value: str | bytes | None) -> str:
     if value is None:
@@ -481,7 +447,6 @@ def _coerce_process_text(value: str | bytes | None) -> str:
     if isinstance(value, bytes):
         return value.decode(errors="replace")
     return value
-
 
 def _sh_quote(value: str) -> str:
     return "'" + value.replace("'", "'\\''") + "'"
