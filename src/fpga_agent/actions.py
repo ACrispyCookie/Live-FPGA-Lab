@@ -23,6 +23,7 @@ DEFAULT_XSDB = Path(os.environ.get("FPGA_AGENT_XSDB", "xsdb"))
 DEFAULT_VIVADO = os.environ.get("FPGA_AGENT_VIVADO", "vivado")
 TELEMETRY_MARKER = "FPGA_AGENT_TELEMETRY_JSON:"
 TARGET_MARKER = "FPGA_AGENT_TARGET"
+DISCOVERY_DONE_MARKER = "FPGA_AGENT_DISCOVERY_DONE"
 COMMAND_DONE_MARKER = "FPGA_AGENT_COMMAND_DONE"
 XSDB_READY_MARKER = "FPGA_AGENT_XSDB_READY"
 VIVADO_READY_MARKER = "FPGA_AGENT_VIVADO_READY"
@@ -141,6 +142,8 @@ foreach fpga $fpgas {{
     }}
     puts "{TARGET_MARKER}\\t$cable_serial\\t$fpga_ctx\\t$fpga_name\\t$processor_ctx\\t$processor_name\\t$dap_ctx"
 }}
+puts {{{DISCOVERY_DONE_MARKER}}}
+flush stdout
 """.strip()
 
 PROGRAM_PL_TCL = """
@@ -459,7 +462,7 @@ class BoardActions:
         self._xsdb_session.stop()
 
     def discover_jtag_targets(self) -> ActionResult:
-        result = self._run_xsdb(DISCOVER_JTAG_TARGETS_TCL, timeout_seconds=self.timeout_seconds, marker=TARGET_MARKER)
+        result = self._run_xsdb(DISCOVER_JTAG_TARGETS_TCL, timeout_seconds=self.timeout_seconds, marker=DISCOVERY_DONE_MARKER)
         if not result.ok:
             return result
         contexts = parse_xsdb_targets(result.stdout)
