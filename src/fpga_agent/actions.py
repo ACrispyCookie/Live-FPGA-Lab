@@ -313,6 +313,7 @@ class TclSession:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 bufsize=1,
+                start_new_session=True,
             )
             ok, stdout, error = self._read_until(self.ready_marker, timeout_seconds=self.timeout_seconds)
             finished_at = datetime.now(UTC).isoformat()
@@ -331,16 +332,20 @@ class TclSession:
                     if process.stdin and process.poll() is None:
                         process.stdin.write("quit\n")
                         process.stdin.flush()
+                        process.stdin.close()
                 except Exception:
                     pass
                 try:
-                    process.terminate()
                     process.wait(timeout=2)
                 except Exception:
                     try:
-                        process.kill()
+                        process.terminate()
+                        process.wait(timeout=2)
                     except Exception:
-                        pass
+                        try:
+                            process.kill()
+                        except Exception:
+                            pass
             if self._script_path is not None:
                 self._script_path.unlink(missing_ok=True)
                 self._script_path = None
