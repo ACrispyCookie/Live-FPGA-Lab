@@ -2,6 +2,7 @@ import logging
 from dataclasses import dataclass
 import asyncio
 import hashlib
+import time
 from pathlib import Path
 from datetime import datetime
 
@@ -29,53 +30,65 @@ class Agent:
         self._discovery_task: asyncio.Task | None = None
         self._telemetry_task: asyncio.Task | None = None
         self._device_locks: dict[str, asyncio.Lock] = {}
+        self._last_telemetry_log: dict[str, tuple[float | None, float]] = {}
 
     async def start(self) -> None:
         if self._running:
             logger.debug("FPGA agent is already running")
             return
-        logger.info("Starting FPGA agent")
+        logger.info("[bold blue]╭─ FPGA agent boot[/]")
+        logger.info(
+            "[blue]│ config[/] discovery=%.1fs telemetry=%.1fs thermal_limit=%.1f°C recovery=%.1f°C",
+            self.config.discovery_interval_seconds,
+            self.config.telemetry_interval_seconds,
+            self.config.over_temperature_c,
+            self.config.over_temperature_recovery_c,
+        )
 
-        logger.info("Starting persistent XSDB action session")
+        logger.info("[blue]│[/] starting persistent [bold]XSDB[/] action session")
         actions_start = await asyncio.to_thread(self._actions.start)
         if not actions_start.ok:
             logger.error(
-                "FPGA agent startup failed: XSDB action session failed to start: %s",
+                "[bold red]╰─ boot failed[/] XSDB session: %s",
                 actions_start.stderr or actions_start.error,
             )
             return
-        logger.info("Persistent XSDB action session started")
+        logger.info("[green]│ ✓[/] XSDB session ready")
 
-        logger.info("Starting persistent Vivado telemetry session")
+        logger.info("[blue]│[/] starting persistent [bold]Vivado hw_manager[/] telemetry session")
         telemetry_start = await asyncio.to_thread(self._actions.start_telemetry)
         if not telemetry_start.ok:
             logger.error(
-                "FPGA agent startup failed: Vivado telemetry session failed to start: %s",
+                "[bold red]╰─ boot failed[/] Vivado session: %s",
                 telemetry_start.stderr or telemetry_start.error,
             )
             await asyncio.to_thread(self._actions.stop)
             return
-        logger.info("Persistent Vivado telemetry session started")
+        logger.info("[green]│ ✓[/] Vivado telemetry session ready")
 
-        logger.info("Performing initial FPGA discovery")
+        logger.info("[blue]│[/] discovering JTAG target graph")
         result = await asyncio.to_thread(self._actions.discover_jtag_targets)
         if not result.ok:
             logger.error(
-                "FPGA agent startup failed: initial discovery failed: %s",
+                "[bold red]╰─ boot failed[/] discovery: %s",
                 result.stderr or result.error,
             )
             await asyncio.to_thread(self._actions.stop)
             return
         targets = result.data or []
         if not targets:
-            logger.error("FPGA agent startup failed: no FPGA devices were discovered")
+            logger.error("[bold red]╰─ boot failed[/] no FPGA devices discovered")
             await asyncio.to_thread(self._actions.stop)
             return
-        register_jtag_discovery(targets)
-        logger.info(
-            "Initial FPGA discovery completed successfully: %d device(s) found",
-            len(targets),
-        )
+        devices = register_jtag_discovery(targets)
+        for device in devices:
+            logger.info(
+                "[green]│ ✓[/] device=%s fpga=%s processor=%s dap=%s",
+                device.device_id,
+                device.target_ctx.fpga_name,
+                device.target_ctx.processor_name or "none",
+                device.target_ctx.dap_id or "none",
+            )
 
         # Background tasks
         self._running = True
@@ -87,12 +100,12 @@ class Agent:
             self._telemetry_loop(),
             name="fpga-telemetry",
         )
-        logger.info("FPGA agent started with discovery and telemetry monitoring enabled")
+        logger.info("[bold green]╰─ FPGA agent online[/] devices=%d monitoring=enabled", len(targets))
 
     async def stop(self) -> None:
         if not self._running:
             return
-        logger.info("Stopping FPGA agent")
+        logger.info("[bold yellow]╭─ FPGA agent shutdown[/]")
         self._running = False
 
         tasks = [
@@ -114,7 +127,7 @@ class Agent:
         self._discovery_task = None
         self._telemetry_task = None
         await asyncio.to_thread(self._actions.stop)
-        logger.info("FPGA agent stopped")
+        logger.info("[bold yellow]╰─ FPGA agent stopped[/]")
 
     def list_devices(self) -> list[FPGAState]:
         return list_fpgas()
@@ -141,21 +154,21 @@ class Agent:
             device = get_fpga(device_id)
             if not device.can_program():
                 raise RuntimeError(f"FPGA {device_id!r} cannot currently be programmed")
-            logger.info("Programming PL on FPGA %s with %s", device_id, bitstream)
+            logger.info("[bold magenta]▶ PL[/] device=%s bitstream=%s", device_id, bitstream)
             result = await asyncio.to_thread(self._actions.program_pl, bitstream, device_state=device)
 
             # State may have changed while the tool was running.
             device = get_fpga(device_id)
             if not result.ok:
                 device = add_fault(device, FaultType.PROGRAMMING_FAILED)
-                logger.error("PL programming failed on FPGA %s: %s, %s", device_id, result.error, result.stderr)
+                logger.error("[bold red]✖ PL[/] device=%s error=%s detail=%s", device_id, result.error, result.stderr)
                 raise RuntimeError(result.stderr or "PL programming failed")
             
             bitstream_id = _sha256_file(Path(bitstream).expanduser().resolve())
             device = clear_fault(device,FaultType.PROGRAMMING_FAILED)
             device = clear_fault(device, FaultType.COMMUNICATION_LOST)
             device = update_fpga(device, bitstream_id=bitstream_id)
-            logger.info("PL programming completed on FPGA %s (bitstream=%s)", device_id, bitstream_id[:12])
+            logger.info("[bold green]✓ PL[/] device=%s bitstream=%s", device_id, bitstream_id[:12])
         return device
 
 
@@ -178,7 +191,7 @@ class Agent:
             device = get_fpga(device_id)
             if not device.can_program():
                 raise RuntimeError(f"FPGA {device_id!r} cannot currently be programmed")
-            logger.info("Programming PS on FPGA %s with %s", device_id, elf)
+            logger.info("[bold magenta]▶ PS[/] device=%s elf=%s", device_id, elf)
             result = await asyncio.to_thread(
                 self._actions.program_ps,
                 device_state=device,
@@ -192,12 +205,12 @@ class Agent:
             device = get_fpga(device_id)
             if not result.ok:
                 device = add_fault(device, FaultType.PROGRAMMING_FAILED)
-                logger.error("PS programming failed on FPGA %s: %s, %s", device_id, result.error, result.stderr)
+                logger.error("[bold red]✖ PS[/] device=%s error=%s detail=%s", device_id, result.error, result.stderr)
                 raise RuntimeError(result.stderr or "PS programming failed")
 
             device = clear_fault(device,FaultType.PROGRAMMING_FAILED)
             device = clear_fault(device, FaultType.COMMUNICATION_LOST)
-            logger.info("PS programming completed on FPGA %s", device_id)
+            logger.info("[bold green]✓ PS[/] device=%s", device_id)
         return device
 
     async def reset_board(
@@ -216,13 +229,13 @@ class Agent:
             device = get_fpga(device_id)
             if not result.ok:
                 device = add_fault(device, FaultType.PROGRAMMING_FAILED)
-                logger.error("Reset failed on FPGA %s: %s, %s", device_id, result.error, result.stderr)
+                logger.error("[bold red]✖ reset[/] device=%s error=%s detail=%s", device_id, result.error, result.stderr)
                 raise RuntimeError(result.stderr or "Reset failed")
 
             device = clear_fault(device,FaultType.PROGRAMMING_FAILED)
             device = clear_fault(device, FaultType.COMMUNICATION_LOST)
             device = update_fpga(device, bitstream_id=None)
-            logger.info("Reset completed on FPGA %s", device_id)
+            logger.info("[bold green]✓ reset[/] device=%s bitstream=cleared", device_id)
             return device
 
     def clear_device_fault(
@@ -251,13 +264,13 @@ class Agent:
                     return
                 
                 if not result.ok:
-                    logger.warning("FPGA discovery failed: %s", result.stderr or result.error)
+                    logger.warning("[yellow]◇ discovery[/] failed: %s", result.stderr or result.error)
                     continue
 
                 targets = result.data or []
                 new = register_jtag_discovery(targets)
                 if new:
-                    logger.debug("FPGA discovery completed: %d device(s) found", len(new))
+                    logger.info("[green]◇ discovery[/] new_devices=%d", len(new))
         except asyncio.CancelledError:
             logger.debug("FPGA discovery task stopped")
             raise
@@ -283,20 +296,43 @@ class Agent:
                 datetime.fromisoformat(result.finished_at)
                 - datetime.fromisoformat(result.started_at)
             )
-            logger.info("Reading telemetry took: %.3fs", duration.total_seconds())
-            if not result.ok or result.data is None:
-                logger.warning("FPGA telemetry failed: %s, %s", result.error, result.stderr)
-
+            logger.debug("telemetry sample device=%s duration=%.3fs", device.device_id, duration.total_seconds())
             await self._handle_telemetry_update(device, result)
 
     async def _handle_telemetry_update(self, device: FPGAState, result: ActionResult):
         if not result.ok:
+            if _has_fault(device, FaultType.COMMUNICATION_LOST):
+                logger.debug("telemetry still unavailable device=%s error=%s detail=%s", device.device_id, result.error, result.stderr)
+                return
+            logger.warning("[yellow]◇ telemetry[/] device=%s failed error=%s detail=%s fault=latched", device.device_id, result.error, result.stderr)
             add_fault(device, FaultType.COMMUNICATION_LOST)
             return
 
         device = clear_fault(device, FaultType.COMMUNICATION_LOST)
         device = update_fpga(device, telemetry=result.data)
+        self._log_telemetry_sample(device, result.data)
         await self._evaluate_safety(device)
+
+    def _log_telemetry_sample(self, device: FPGAState, telemetry: FPGATelemetry) -> None:
+        temperature = telemetry.temperature_c
+        now = time.monotonic()
+        previous_temperature, previous_log_at = self._last_telemetry_log.get(device.device_id, (None, 0.0))
+        first_sample = previous_temperature is None
+        changed = temperature is not None and previous_temperature is not None and abs(temperature - previous_temperature) >= 0.3
+        heartbeat_due = now - previous_log_at >= 600.0
+        near_limit = temperature is not None and temperature >= self.config.over_temperature_c - 5.0
+        if not (first_sample or changed):
+            return
+        self._last_telemetry_log[device.device_id] = (temperature, now)
+        style = "red" if near_limit else "cyan"
+        logger.info(
+            "[bold %s]◇ telemetry[/] device=%s temp=%s status=%s faults=%d",
+            style,
+            device.device_id,
+            _format_temperature(temperature),
+            device.status,
+            len(device.faults),
+        )
 
     async def _evaluate_safety(
         self,
@@ -304,6 +340,14 @@ class Agent:
     ) -> None:
         temperature = device.telemetry.temperature_c
         if temperature is None or temperature >= self.config.over_temperature_c:
+            if _has_fault(device, FaultType.OVER_TEMPERATURE):
+                return
+            logger.critical(
+                "[bold red]⚠ safety[/] device=%s temp=%s threshold=%.1f°C action=reset fault=latched",
+                device.device_id,
+                _format_temperature(temperature),
+                self.config.over_temperature_c,
+            )
             await self._safety_reset(device.device_id)
             add_fault(device, FaultType.OVER_TEMPERATURE)
         elif temperature < self.config.over_temperature_recovery_c:
@@ -340,3 +384,11 @@ def _sha256_file(path: Path) -> str:
             hasher.update(chunk)
 
     return hasher.hexdigest()
+
+
+def _format_temperature(value: float | None) -> str:
+    return "unknown" if value is None else f"{value:.1f}°C"
+
+
+def _has_fault(device: FPGAState, fault_type: FaultType) -> bool:
+    return any(fault.type == fault_type for fault in device.faults)

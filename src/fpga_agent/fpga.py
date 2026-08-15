@@ -174,10 +174,11 @@ def add_fault(device_state: FPGAState, fault_type: FaultType) -> FPGAState:
         )
 
         logger.error(
-            "A fault has occured on FPGA %s of type %s: %s",
+            "[bold red]✖ fault latched[/] device=%s type=%s bitstream=%s telemetry=%s",
             updated.device_id,
             fault_type,
-            updated.telemetry
+            fault.bitstream_id or "none",
+            updated.telemetry,
         )
         _FPGA_STATES[updated.device_id] = updated
         return updated
@@ -205,10 +206,10 @@ def clear_fault(device_state: FPGAState, fault_type: FaultType) -> FPGAState:
         )
 
         logger.info(
-            "A fault has been cleared on FPGA %s of type %s: %s",
+            "[bold green]✓ fault cleared[/] device=%s type=%s telemetry=%s",
             updated.device_id,
             fault_type,
-            updated.telemetry
+            updated.telemetry,
         )
         _FPGA_STATES[updated.device_id] = updated
         return updated

@@ -1,7 +1,6 @@
-import logging
 from contextlib import asynccontextmanager
-
 import logging
+
 from rich.logging import RichHandler
 import uvicorn
 from fastapi import FastAPI
@@ -12,7 +11,8 @@ from .rpc import create_rpc_app
 logging.basicConfig(
     level=logging.INFO,
     format="%(message)s",
-    handlers=[RichHandler()],
+    datefmt="[%X]",
+    handlers=[RichHandler(rich_tracebacks=True, markup=True, show_path=True)],
 )
 
 # Silence Uvicorn completely.
