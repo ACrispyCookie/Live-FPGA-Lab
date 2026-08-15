@@ -318,7 +318,7 @@ class Agent:
         now = time.monotonic()
         previous_temperature, previous_log_at = self._last_telemetry_log.get(device.device_id, (None, 0.0))
         first_sample = previous_temperature is None
-        changed = temperature is not None and previous_temperature is not None and abs(temperature - previous_temperature) >= 0.3
+        changed = temperature is not None and previous_temperature is not None and abs(temperature - previous_temperature) >= 0.5
         heartbeat_due = now - previous_log_at >= 600.0
         near_limit = temperature is not None and temperature >= self.config.over_temperature_c - 5.0
         if not (first_sample or changed):

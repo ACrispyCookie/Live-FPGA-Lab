@@ -55,11 +55,11 @@ def create_rpc_app(agent: Agent) -> FastAPI:
         )
         return response
 
-    @app.get("/devices", response_model=list[FPGAState])
+    @app.get("/devices", response_model=list[str])
     async def list_devices():
         devices = agent.list_devices()
         logger.info("[cyan]◆ devices[/] listed count=%d", len(devices))
-        return devices
+        return [device.device_id for device in devices]
 
     @app.get("/devices/{device_id}", response_model=FPGAState)
     async def get_device(device_id: str):
