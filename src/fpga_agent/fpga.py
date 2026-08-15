@@ -6,7 +6,9 @@ from threading import RLock
 from dataclasses import dataclass
 
 from pydantic import BaseModel, Field, computed_field
+import logging
 
+logger = logging.getLogger(__name__)
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -134,17 +136,20 @@ def get_fpga(device_id: str) -> FPGAState:
             raise KeyError(f"unknown FPGA device {device_id!r}") from exc
 
 
-def register_fpga(state: FPGAState) -> FPGAState:
+def register_fpga(state: FPGAState) -> FPGAState | None:
     updated = state.model_copy(update={"updated_at": utc_now()})
     with _FPGA_LOCK:
-        _FPGA_STATES[updated.device_id] = updated
-    return updated
+        if updated.device_id not in _FPGA_STATES:
+            _FPGA_STATES[updated.device_id] = updated
+            return updated
+    return None
 
 
 def update_fpga(device_state: FPGAState, **changes) -> FPGAState:
     with _FPGA_LOCK:
-        updated = device_state.model_copy(update={**changes, "updated_at": utc_now()})
-        _FPGA_STATES[device_state.device_id] = updated
+        current = _FPGA_STATES[device_state.device_id]
+        updated = current.model_copy(update={**changes, "updated_at": utc_now()})
+        _FPGA_STATES[current.device_id] = updated
         return updated
 
 
@@ -157,36 +162,54 @@ def add_fault(device_state: FPGAState, fault_type: FaultType) -> FPGAState:
             for fault in current.faults
         ):
             return current
-        
         fault = FPGAFault(type=fault_type,
-                          bitstream_id=device_state.bitstream_id, 
-                          telemetry=device_state.telemetry
+                          bitstream_id=current.bitstream_id, 
+                          telemetry=current.telemetry.model_copy()
         )
-
-        updated = device_state.model_copy(
+        updated = current.model_copy(
             update={
-                "faults": [*device_state.faults, fault],
+                "faults": [*current.faults, fault],
                 "updated_at": utc_now(),
             }
         )
 
+        logger.error(
+            "A fault has occured on FPGA %s of type %s: %s",
+            updated.device_id,
+            fault_type,
+            updated.telemetry
+        )
         _FPGA_STATES[updated.device_id] = updated
         return updated
 
     
 def clear_fault(device_state: FPGAState, fault_type: FaultType) -> FPGAState:
     with _FPGA_LOCK:
-        updated = device_state.model_copy(
+        current = _FPGA_STATES[device_state.device_id]
+
+        if not any(
+            fault.type == fault_type
+            for fault in current.faults
+        ):
+            return current
+
+        updated = current.model_copy(
             update={
                 "faults": [
                     fault
-                    for fault in device_state.faults
+                    for fault in current.faults
                     if fault.type != fault_type
                 ],
                 "updated_at": utc_now(),
             }
         )
 
+        logger.info(
+            "A fault has been cleared on FPGA %s of type %s: %s",
+            updated.device_id,
+            fault_type,
+            updated.telemetry
+        )
         _FPGA_STATES[updated.device_id] = updated
         return updated
 
@@ -199,5 +222,7 @@ def register_jtag_discovery(targets: list[JTAGTargetContext]) -> list[FPGAState]
         state = FPGAState(
             target_ctx=target,
         )
-        discovered.append(register_fpga(state))
+        registered = register_fpga(state)
+        if registered:
+            discovered.append(registered)
     return discovered

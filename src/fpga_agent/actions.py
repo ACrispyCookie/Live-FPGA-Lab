@@ -336,15 +336,6 @@ def _run_xilinx_script(
         finished_at=finished_at,
     )
 
-def _sha256_file(path: Path) -> str:
-    hasher = hashlib.sha256()
-
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(1024 * 1024), b""):
-            hasher.update(chunk)
-
-    return hasher.hexdigest()
-
 def _local_error(error: ActionError, message: str) -> ActionResult:
     now = datetime.now(UTC).isoformat()
     return ActionResult(False, error, (), "", message, now, now)
