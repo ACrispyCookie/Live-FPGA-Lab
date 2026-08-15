@@ -147,23 +147,29 @@ proc emit_telemetry {payload} {
 if {[catch {
     open_hw_manager
     connect_hw_server
-    set targets [get_hw_targets *@@CABLE@@*]
-    if {[llength $targets] == 0} { error "no hardware target found for cable @@CABLE@@" }
+    set targets [get_hw_targets -quiet *@@CABLE@@*]
+    if {[llength $targets] == 0} {
+        error "no hardware target found for cable @@CABLE@@"
+    }
     current_hw_target [lindex $targets 0]
     open_hw_target
-    set devices [get_hw_devices *@@FPGA_NAME@@*]
-    if {[llength $devices] == 0} { error "no hardware device found for FPGA @@FPGA_NAME@@" }
+    set devices [get_hw_devices -quiet *@@FPGA_NAME@@*]
+    if {[llength $devices] == 0} {
+        error "no hardware device found for FPGA @@FPGA_NAME@@"
+    }
     set device [lindex $devices 0]
     current_hw_device $device
     refresh_hw_device $device
-    set temperature ""
-    foreach prop {TEMPERATURE XADC_TEMPERATURE TEMP} {
-        if {[catch {set value [get_property $prop $device]}] == 0 && $value ne ""} {
-            set temperature $value
-            break
-        }
+    set sysmons [get_hw_sysmons -quiet -of_objects $device]
+    if {[llength $sysmons] == 0} {
+        error "no system monitor found for FPGA @@FPGA_NAME@@"
     }
-    if {$temperature eq ""} { error "temperature property unavailable" }
+    set sysmon [lindex $sysmons 0]
+    refresh_hw_sysmon -properties {TEMPERATURE} $sysmon
+    set temperature [get_property TEMPERATURE $sysmon]
+    if {$temperature eq ""} {
+        error "temperature unavailable"
+    }
     emit_telemetry "{\"temperature_c\": $temperature}"
 } result]} {
     set escaped [string map {\\ \\\\ \" \\\" \n { }} $result]
@@ -230,7 +236,7 @@ class BoardActions:
             return error
         script = _render_template(
             PROGRAM_PL_TCL,
-            FPGA_TARGET_ID=device_state.target_ctx.fpga_id,
+            FPGA_TARGET_ID=device_state.target_ctx.fpga_ctx,
             BITSTREAM=_tcl_path(bitstream_path),
         )
         result = self._run_xsdb(script, timeout_seconds=self.timeout_seconds)
@@ -245,7 +251,7 @@ class BoardActions:
         reset_processor: bool = True,
         continue_after_download: bool = True,
     ) -> ActionResult:
-        if not device_state.target_ctx.core_id:
+        if not device_state.target_ctx.processor_ctx:
             return _local_error(ActionError.FPGA_INCOMPATIBLE, "PS programming requires a discovered core target id")
         ps7_init_path, error = _require_file(ps7_init_tcl, label="PS7 init Tcl")
         if error:
@@ -255,7 +261,7 @@ class BoardActions:
             return error
         script = _render_template(
             PROGRAM_PS_TCL,
-            CORE_TARGET_ID=device_state.target_ctx.core_id,
+            CORE_TARGET_ID=device_state.target_ctx.processor_ctx,
             RESET_PROCESSOR="rst -processor" if reset_processor else "",
             PS7_INIT_TCL=_tcl_path(ps7_init_path),
             ELF=_tcl_path(elf_path),
@@ -264,27 +270,24 @@ class BoardActions:
         return self._run_xsdb(script, timeout_seconds=self.timeout_seconds)
 
     def reset_board(self, *, device_state: FPGAState) -> ActionResult:
-        if not device_state.target_ctx.core_id:
+        if not device_state.target_ctx.processor_ctx:
             return _local_error(ActionError.FPGA_INCOMPATIBLE, "board reset requires a discovered core target id")
         script = _render_template(
             RESET_BOARD_TCL,
-            CORE_TARGET_ID=device_state.target_ctx.core_id,
+            CORE_TARGET_ID=device_state.target_ctx.processor_ctx,
             DAP_RESET_COMMAND=_dap_reset_command(device_state.target_ctx),
-            FPGA_TARGET_ID=device_state.target_ctx.fpga_id,
+            FPGA_TARGET_ID=device_state.target_ctx.fpga_ctx,
         )
         result = self._run_xsdb(script, timeout_seconds=90)
         return result
 
     def read_telemetry(self, *, device_state: FPGAState) -> ActionResult:
-        logging.info("reading" + VIVADO_TELEMETRY_TCL)
         script = _render_template(
             VIVADO_TELEMETRY_TCL,
-            CABLE=device_state.target_ctx.cable,
+            CABLE=device_state.target_ctx.cable_serial,
             FPGA_NAME=device_state.target_ctx.fpga_name,
         )
-        logging.info("script: ")
         result = self._run_vivado(script, timeout_seconds=90)
-        logging.info(result.stdout)
         payload = parse_telemetry_payload(result.stdout) or {}
         telemetry = _telemetry_from_payload(payload)
         if not telemetry:
@@ -343,9 +346,11 @@ def parse_telemetry_payload(stdout: str) -> dict[str, Any] | None:
     """Parse the telemetry JSON emitted by the Tcl probe."""
 
     for line in stdout.splitlines():
-        if TELEMETRY_MARKER not in line:
+        line = line.strip()
+        if not line.startswith(TELEMETRY_MARKER):
             continue
         payload = line.split(TELEMETRY_MARKER, 1)[1].strip()
+
         try:
             parsed = json.loads(payload)
         except json.JSONDecodeError:
@@ -366,7 +371,6 @@ def _run_xilinx_script(
         return _local_error(ActionError.TOOL_MISSING, f"Vivado settings file not found: {vivado_settings}")
     script_path = _write_temp_script(script)
     command = ("bash", "-lc", _shell_command(vivado_settings, executable, executable_args, script_path))
-    logging.info(command)
     started_at = datetime.now(UTC).isoformat()
     try:
         completed = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout_seconds, check=False)
@@ -416,12 +420,9 @@ def _shell_command(vivado_settings: Path, executable: str, executable_args: tupl
     return f"{prefix} && {_sh_quote(executable)} {args}"
 
 def _render_template(template: str, **values: str) -> str:
-    logging.info("calling\n")
     rendered = template
-    logging.info(template)
     for key, value in values.items():
         rendered = rendered.replace("@@" + key + "@@", value)
-    logging.info(rendered)
     return rendered
 
 def _telemetry_from_payload(payload: dict[str, Any]) -> FPGATelemetry | None:

@@ -3,6 +3,7 @@ from dataclasses import dataclass
 import asyncio
 import hashlib
 from pathlib import Path
+from datetime import datetime
 
 from .actions import BoardActions, ActionResult, ActionError
 from .fpga import register_jtag_discovery, list_fpgas, update_fpga, add_fault, clear_fault, get_fpga, FPGAState, FPGATelemetry, FaultType
@@ -225,6 +226,9 @@ class Agent:
                 await asyncio.sleep(self.config.discovery_interval_seconds)
 
                 result = await asyncio.to_thread(self._actions.discover_jtag_targets)
+                if not self._running:
+                    return
+                
                 if not result.ok:
                     logger.warning("FPGA discovery failed: %s", result.stderr or result.error)
                     continue
@@ -251,8 +255,16 @@ class Agent:
 
         for device in devices:
             result = await asyncio.to_thread(self._actions.read_telemetry, device_state=device)
+            if not self._running:
+                return
+
+            duration = (
+                datetime.fromisoformat(result.finished_at)
+                - datetime.fromisoformat(result.started_at)
+            )
+            logger.info("Reading telemetry took: %.3fs", duration.total_seconds())
             if not result.ok or result.data is None:
-                logger.warning("FPGA telemetry failed: %s", result.stderr or result.error)
+                logger.warning("FPGA telemetry failed: %s, %s", result.error, result.stderr)
 
             await self._handle_telemetry_update(device, result)
 
@@ -263,15 +275,15 @@ class Agent:
 
         device = clear_fault(device, FaultType.COMMUNICATION_LOST)
         device = update_fpga(device, telemetry=result.data)
-        self._evaluate_safety(device)
+        await self._evaluate_safety(device)
 
-    def _evaluate_safety(
+    async def _evaluate_safety(
         self,
         device: FPGAState,
     ) -> None:
         temperature = device.telemetry.temperature_c
         if temperature is None or temperature >= self.config.over_temperature_c:
-            self._safety_reset(device)
+            await self._safety_reset(device.device_id)
             add_fault(device, FaultType.OVER_TEMPERATURE)
         elif temperature < self.config.over_temperature_recovery_c:
             clear_fault(device, FaultType.OVER_TEMPERATURE)

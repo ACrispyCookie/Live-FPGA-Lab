@@ -23,10 +23,10 @@ logging.getLogger("uvicorn.access").disabled = True
 
 agent = Agent(
     AgentConfig(
-        discovery_interval_seconds=5.0,
+        discovery_interval_seconds=10.0,
         telemetry_interval_seconds=1.0,
-        over_temperature_c=75.0,
-        over_temperature_recovery_c=60.0,
+        over_temperature_c=40.0,
+        over_temperature_recovery_c=30.0,
     )
 )
 
