@@ -161,39 +161,10 @@ puts {fpga-agent: programmed PS}
 """.strip()
 
 RESET_BOARD_TCL = """
-proc fpga_agent_reset_step {label body} {
-    puts "fpga-agent: reset step $label"
-    flush stdout
-    if {[catch {uplevel 1 $body} result]} {
-        puts "fpga-agent: reset warning $label: $result"
-        flush stdout
-    }
-}
-
-fpga_agent_reset_step processor {
-    targets -set -filter {target_ctx == "@@PROCESSOR_CTX@@"}
-    catch {stop}
-    rst -processor
-    catch {stop}
-}
-
-fpga_agent_reset_step devcfg {
-    targets -set -filter {target_ctx == "@@PROCESSOR_CTX@@"}
-    set ctrl [mrd -value 0xF8007000]
-    mwr 0xF8007000 [expr {$ctrl & ~(1 << 30)}]
-    after 100
-    mwr 0xF8007000 [expr {$ctrl | (1 << 30)}]
-}
-
-fpga_agent_reset_step fpga_srst {
-    targets -set -filter {target_ctx == "@@FPGA_CTX@@"}
-    rst -srst
-}
-
-@@DAP_RESET_COMMAND@@
-
+targets -set -filter {target_ctx == "@@PROCESSOR_CTX@@"}
+rst -system
+after 500
 puts {fpga-agent: reset complete}
-flush stdout
 """.strip()
 
 TELEMETRY_TCL = r"""

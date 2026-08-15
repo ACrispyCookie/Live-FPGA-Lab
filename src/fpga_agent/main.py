@@ -25,8 +25,8 @@ agent = Agent(
     AgentConfig(
         discovery_interval_seconds=10.0,
         telemetry_interval_seconds=1.0,
-        over_temperature_c=51.0,
-        over_temperature_recovery_c=50.0,
+        over_temperature_c=75.0,
+        over_temperature_recovery_c=60.0,
     )
 )
 

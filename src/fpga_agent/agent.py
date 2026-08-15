@@ -154,21 +154,21 @@ class Agent:
             device = get_fpga(device_id)
             if not device.can_program():
                 raise RuntimeError(f"FPGA {device_id!r} cannot currently be programmed")
-            logger.info("[bold magenta]▶ PL[/] device=%s bitstream=%s", device_id, bitstream)
+            logger.info("[blue]▶ pl.program[/] device=%s bitstream=%s", device_id, bitstream)
             result = await asyncio.to_thread(self._actions.program_pl, bitstream, device_state=device)
 
             # State may have changed while the tool was running.
             device = get_fpga(device_id)
             if not result.ok:
                 device = add_fault(device, FaultType.PROGRAMMING_FAILED)
-                logger.error("[bold red]✖ PL[/] device=%s error=%s detail=%s", device_id, result.error, result.stderr)
+                logger.error("[bold red]✖ pl.program[/] device=%s error=%s detail=%s", device_id, result.error, result.stderr)
                 raise RuntimeError(result.stderr or "PL programming failed")
             
             bitstream_id = _sha256_file(Path(bitstream).expanduser().resolve())
             device = clear_fault(device,FaultType.PROGRAMMING_FAILED)
             device = clear_fault(device, FaultType.COMMUNICATION_LOST)
             device = update_fpga(device, bitstream_id=bitstream_id)
-            logger.info("[bold green]✓ PL[/] device=%s bitstream=%s", device_id, bitstream_id[:12])
+            logger.info("[green]✓ pl.program[/] device=%s bitstream=%s", device_id, bitstream_id[:12])
         return device
 
 
@@ -191,7 +191,7 @@ class Agent:
             device = get_fpga(device_id)
             if not device.can_program():
                 raise RuntimeError(f"FPGA {device_id!r} cannot currently be programmed")
-            logger.info("[bold magenta]▶ PS[/] device=%s elf=%s", device_id, elf)
+            logger.info("[blue]▶ ps.program[/] device=%s elf=%s", device_id, elf)
             result = await asyncio.to_thread(
                 self._actions.program_ps,
                 device_state=device,
@@ -205,12 +205,12 @@ class Agent:
             device = get_fpga(device_id)
             if not result.ok:
                 device = add_fault(device, FaultType.PROGRAMMING_FAILED)
-                logger.error("[bold red]✖ PS[/] device=%s error=%s detail=%s", device_id, result.error, result.stderr)
+                logger.error("[bold red]✖ ps.program[/] device=%s error=%s detail=%s", device_id, result.error, result.stderr)
                 raise RuntimeError(result.stderr or "PS programming failed")
 
             device = clear_fault(device,FaultType.PROGRAMMING_FAILED)
             device = clear_fault(device, FaultType.COMMUNICATION_LOST)
-            logger.info("[bold green]✓ PS[/] device=%s", device_id)
+            logger.info("[green]✓ ps.program[/] device=%s", device_id)
         return device
 
     async def reset_board(
@@ -229,13 +229,13 @@ class Agent:
             device = get_fpga(device_id)
             if not result.ok:
                 device = add_fault(device, FaultType.PROGRAMMING_FAILED)
-                logger.error("[bold red]✖ reset[/] device=%s error=%s detail=%s", device_id, result.error, result.stderr)
+                logger.error("[bold red]✖ board.reset[/] device=%s error=%s detail=%s", device_id, result.error, result.stderr)
                 raise RuntimeError(result.stderr or "Reset failed")
 
             device = clear_fault(device,FaultType.PROGRAMMING_FAILED)
             device = clear_fault(device, FaultType.COMMUNICATION_LOST)
             device = update_fpga(device, bitstream_id=None)
-            logger.info("[bold green]✓ reset[/] device=%s bitstream=cleared", device_id)
+            logger.info("[green]✓ board.reset[/] device=%s bitstream=cleared", device_id)
             return device
 
     def clear_device_fault(
