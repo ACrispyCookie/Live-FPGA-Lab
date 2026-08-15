@@ -1,29 +1,87 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
+import select
 import subprocess
 import tempfile
-import logging
+import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import Enum
 from pathlib import Path
 from typing import Any
-from enum import Enum
 
 from .fpga import FPGATelemetry, FPGAState, JTAGTargetContext
 
-logger = logging.getLogger('actions')
+logger = logging.getLogger("actions")
 
 DEFAULT_VIVADO_SETTINGS = Path(os.environ.get("FPGA_AGENT_VIVADO_SETTINGS", "~/Xilinx/2025.2/Vivado/settings64.sh")).expanduser()
 DEFAULT_XSDB = Path(os.environ.get("FPGA_AGENT_XSDB", "xsdb"))
 DEFAULT_VIVADO = os.environ.get("FPGA_AGENT_VIVADO", "vivado")
 TELEMETRY_MARKER = "FPGA_AGENT_TELEMETRY_JSON:"
 TARGET_MARKER = "FPGA_AGENT_TARGET"
+COMMAND_DONE_MARKER = "FPGA_AGENT_COMMAND_DONE"
+XSDB_READY_MARKER = "FPGA_AGENT_XSDB_READY"
+VIVADO_READY_MARKER = "FPGA_AGENT_VIVADO_READY"
+SCRIPT_END_MARKER = "__FPGA_AGENT_SCRIPT_END__"
+
+XSDB_SESSION_TCL = f"""
+proc fpga_agent_escape {{value}} {{
+    return [string map {{\\ \\\\ \t {{ }} \r {{ }} \n {{ }}}} $value]
+}}
+connect
+puts {{{XSDB_READY_MARKER}}}
+flush stdout
+while {{[gets stdin line] >= 0}} {{
+    if {{$line eq "quit"}} {{ exit }}
+    set script ""
+    while {{$line ne "{SCRIPT_END_MARKER}"}} {{
+        append script $line "\n"
+        if {{[gets stdin line] < 0}} {{ exit }}
+    }}
+    if {{[catch {{uplevel #0 $script}} result]}} {{
+        puts "{COMMAND_DONE_MARKER}\terror\t[fpga_agent_escape $result]"
+    }} else {{
+        puts "{COMMAND_DONE_MARKER}\tok\t[fpga_agent_escape $result]"
+    }}
+    flush stdout
+}}
+""".strip()
+
+VIVADO_SESSION_TCL = f"""
+proc fpga_agent_escape {{value}} {{
+    return [string map {{\\ \\\\ \t {{ }} \r {{ }} \n {{ }}}} $value]
+}}
+if {{[catch {{
+    open_hw_manager
+    connect_hw_server
+}} result]}} {{
+    puts "{COMMAND_DONE_MARKER}\terror\t[fpga_agent_escape $result]"
+    flush stdout
+    exit 1
+}}
+puts {{{VIVADO_READY_MARKER}}}
+flush stdout
+while {{[gets stdin line] >= 0}} {{
+    if {{$line eq "quit"}} {{ exit }}
+    set script ""
+    while {{$line ne "{SCRIPT_END_MARKER}"}} {{
+        append script $line "\n"
+        if {{[gets stdin line] < 0}} {{ exit }}
+    }}
+    if {{[catch {{uplevel #0 $script}} result]}} {{
+        puts "{COMMAND_DONE_MARKER}\terror\t[fpga_agent_escape $result]"
+    }} else {{
+        puts "{COMMAND_DONE_MARKER}\tok\t[fpga_agent_escape $result]"
+    }}
+    flush stdout
+}}
+""".strip()
 
 DISCOVER_JTAG_TARGETS_TCL = f"""
-connect
 proc is_fpga {{name}} {{
     return [regexp -nocase {{^(xc|xck|xcu|xq|xa)}} $name]
 }}
@@ -57,7 +115,6 @@ foreach props [targets -target-properties] {{
             if {{[dict exists $props level]}} {{
                 set level [dict get $props level]
             }}
-
             if {{$level == 0 || ![dict exists $daps $cable_serial]}} {{
                 dict set daps $cable_serial $target_id
             }}
@@ -72,34 +129,30 @@ foreach fpga $fpgas {{
     if {{[dict exists $processors $cable_serial]}} {{
         set cores [dict get $processors $cable_serial]
         set selected [lindex $cores 0]
-
         foreach core $cores {{
             if {{[string match "*#0*" [lindex $core 1]]}} {{
                 set selected $core
                 break
             }}
         }}
-
         lassign $selected processor_ctx processor_name
     }}
     if {{[dict exists $daps $cable_serial]}} {{
         set dap_id [dict get $daps $cable_serial]
     }}
     puts "{TARGET_MARKER}\\t$cable_serial\\t$fpga_ctx\\t$fpga_name\\t$processor_ctx\\t$processor_name\\t$dap_id"
+    puts "{COMMAND_DONE_MARKER}\\tok\\t"
+    flush stdout
 }}
-exit
 """.strip()
 
 PROGRAM_PL_TCL = """
-connect
 targets -set @@FPGA_TARGET_ID@@
 fpga -file @@BITSTREAM@@
 puts {fpga-agent: programmed PL}
-exit
 """.strip()
 
 PROGRAM_PS_TCL = """
-connect
 targets -set @@CORE_TARGET_ID@@
 @@RESET_PROCESSOR@@
 source @@PS7_INIT_TCL@@
@@ -108,11 +161,9 @@ ps7_post_config
 dow @@ELF@@
 @@CONTINUE_AFTER_DOWNLOAD@@
 puts {fpga-agent: programmed PS}
-exit
 """.strip()
 
 RESET_BOARD_TCL = """
-connect
 catch {
     targets -set @@CORE_TARGET_ID@@
     stop
@@ -136,23 +187,25 @@ catch {
     puts [fpga -state]
 }
 puts {fpga-agent: reset complete}
-exit
 """.strip()
 
-VIVADO_TELEMETRY_TCL = r"""
+TELEMETRY_TCL = r"""
 proc emit_telemetry {payload} {
     puts "FPGA_AGENT_TELEMETRY_JSON:$payload"
+    flush stdout
 }
-
+proc fpga_agent_json_escape {value} {
+    return [string map {\ \\ " \" \n { }} $value]
+}
 if {[catch {
-    open_hw_manager
-    connect_hw_server
     set targets [get_hw_targets -quiet *@@CABLE@@*]
     if {[llength $targets] == 0} {
         error "no hardware target found for cable @@CABLE@@"
     }
     current_hw_target [lindex $targets 0]
-    open_hw_target
+    if {[catch {open_hw_target} open_result] && ![string match -nocase "*already*open*" $open_result]} {
+        error $open_result
+    }
     set devices [get_hw_devices -quiet *@@FPGA_NAME@@*]
     if {[llength $devices] == 0} {
         error "no hardware device found for FPGA @@FPGA_NAME@@"
@@ -172,10 +225,8 @@ if {[catch {
     }
     emit_telemetry "{\"temperature_c\": $temperature}"
 } result]} {
-    set escaped [string map {\\ \\\\ \" \\\" \n { }} $result]
-    emit_telemetry "{\"error\": \"$escaped\"}"
+    emit_telemetry "{\"error\": \"[fpga_agent_json_escape $result]\"}"
 }
-exit
 """.strip()
 
 
@@ -185,6 +236,8 @@ class ActionError(str, Enum):
     FPGA_INCOMPATIBLE = "fpga_incompatible"
     COMMAND_ERROR = "command_error"
     TIMEOUT = "timeout"
+    NOT_STARTED = "not_started"
+
 
 @dataclass(frozen=True)
 class ActionResult:
@@ -209,6 +262,148 @@ class ActionResult:
             "data": self.data,
         }
 
+
+class TclSession:
+    def __init__(
+        self,
+        *,
+        name: str,
+        executable: str,
+        executable_args: tuple[str, ...],
+        startup_script: str,
+        ready_marker: str,
+        vivado_settings: Path,
+        timeout_seconds: int,
+    ) -> None:
+        self.name = name
+        self.executable = executable
+        self.executable_args = executable_args
+        self.startup_script = startup_script
+        self.ready_marker = ready_marker
+        self.vivado_settings = Path(vivado_settings).expanduser()
+        self.timeout_seconds = timeout_seconds
+        self._lock = threading.RLock()
+        self._process: subprocess.Popen[str] | None = None
+        self._script_path: Path | None = None
+        self._command: tuple[str, ...] = ()
+
+    @property
+    def running(self) -> bool:
+        process = self._process
+        return process is not None and process.poll() is None
+
+    def start(self) -> ActionResult:
+        with self._lock:
+            if self.running:
+                now = datetime.now(UTC).isoformat()
+                return ActionResult(True, None, self._command, "", "", now, now)
+            if not self.vivado_settings.exists():
+                return _local_error(ActionError.TOOL_MISSING, f"Vivado settings file not found: {self.vivado_settings}")
+            self._script_path = _write_temp_script(self.startup_script)
+            self._command = (
+                "bash",
+                "-lc",
+                _shell_command(self.vivado_settings, self.executable, self.executable_args, self._script_path),
+            )
+            started_at = datetime.now(UTC).isoformat()
+            self._process = subprocess.Popen(
+                self._command,
+                text=True,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=1,
+            )
+            ok, stdout, error = self._read_until(self.ready_marker, timeout_seconds=self.timeout_seconds)
+            finished_at = datetime.now(UTC).isoformat()
+            if ok:
+                return ActionResult(True, None, self._command, stdout, "", started_at, finished_at)
+            stderr = self._read_stderr()
+            self.stop()
+            return ActionResult(False, ActionError.COMMAND_ERROR, self._command, stdout, stderr or error, started_at, finished_at)
+
+    def stop(self) -> None:
+        with self._lock:
+            process = self._process
+            self._process = None
+            if process is not None:
+                try:
+                    if process.stdin and process.poll() is None:
+                        process.stdin.write("quit\n")
+                        process.stdin.flush()
+                except Exception:
+                    pass
+                try:
+                    process.terminate()
+                    process.wait(timeout=2)
+                except Exception:
+                    try:
+                        process.kill()
+                    except Exception:
+                        pass
+            if self._script_path is not None:
+                self._script_path.unlink(missing_ok=True)
+                self._script_path = None
+
+    def run(self, script: str, *, timeout_seconds: int | None = None, marker: str = COMMAND_DONE_MARKER) -> ActionResult:
+        with self._lock:
+            if not self.running:
+                return _local_error(ActionError.NOT_STARTED, f"{self.name} session is not running")
+            process = self._process
+            if process is None or process.stdin is None:
+                return _local_error(ActionError.NOT_STARTED, f"{self.name} session is not running")
+            started_at = datetime.now(UTC).isoformat()
+            try:
+                process.stdin.write(script.rstrip() + "\n")
+                process.stdin.write(SCRIPT_END_MARKER + "\n")
+                process.stdin.flush()
+            except BrokenPipeError:
+                self.stop()
+                return ActionResult(False, ActionError.COMMAND_ERROR, self._command, "", f"{self.name} session exited", started_at, datetime.now(UTC).isoformat())
+            ok, stdout, error = self._read_until(marker, timeout_seconds=timeout_seconds or self.timeout_seconds)
+            finished_at = datetime.now(UTC).isoformat()
+            if not ok:
+                stderr = self._read_stderr()
+                self.stop()
+                return ActionResult(False, ActionError.COMMAND_ERROR, self._command, stdout, stderr or error, started_at, finished_at)
+            command_error = _command_done_error(stdout)
+            if command_error:
+                return ActionResult(False, ActionError.COMMAND_ERROR, self._command, stdout, command_error, started_at, finished_at)
+            return ActionResult(True, None, self._command, stdout, "", started_at, finished_at)
+
+    def _read_until(self, marker: str, *, timeout_seconds: int) -> tuple[bool, str, str]:
+        process = self._process
+        if process is None or process.stdout is None:
+            return False, "", "process is not running"
+        deadline = datetime.now(UTC).timestamp() + timeout_seconds
+        lines: list[str] = []
+        while datetime.now(UTC).timestamp() < deadline:
+            remaining = max(0.0, deadline - datetime.now(UTC).timestamp())
+            ready, _, _ = select.select([process.stdout], [], [], min(0.25, remaining))
+            if ready:
+                line = process.stdout.readline()
+                if line:
+                    lines.append(line)
+                    if marker in line:
+                        return True, "".join(lines), ""
+            if process.poll() is not None:
+                return False, "".join(lines), f"process exited with {process.returncode}"
+        return False, "".join(lines), f"timed out waiting for {marker}"
+
+    def _read_stderr(self) -> str:
+        process = self._process
+        if process is None or process.stderr is None:
+            return ""
+        if process.poll() is None:
+            ready, _, _ = select.select([process.stderr], [], [], 0)
+            if not ready:
+                return ""
+        try:
+            return process.stderr.read() or ""
+        except Exception:
+            return ""
+
+
 class BoardActions:
     def __init__(
         self,
@@ -222,9 +417,37 @@ class BoardActions:
         self.xsdb = Path(xsdb)
         self.vivado = vivado
         self.timeout_seconds = timeout_seconds
+        self._xsdb_session = TclSession(
+            name="xsdb",
+            executable=str(self.xsdb),
+            executable_args=(),
+            startup_script=XSDB_SESSION_TCL,
+            ready_marker=XSDB_READY_MARKER,
+            vivado_settings=self.vivado_settings,
+            timeout_seconds=max(90, self.timeout_seconds),
+        )
+        self._vivado_session = TclSession(
+            name="vivado",
+            executable=self.vivado,
+            executable_args=("-mode", "batch", "-source"),
+            startup_script=VIVADO_SESSION_TCL,
+            ready_marker=VIVADO_READY_MARKER,
+            vivado_settings=self.vivado_settings,
+            timeout_seconds=max(90, self.timeout_seconds),
+        )
+
+    def start(self) -> ActionResult:
+        return self._xsdb_session.start()
+
+    def start_telemetry(self) -> ActionResult:
+        return self._vivado_session.start()
+
+    def stop(self) -> None:
+        self._vivado_session.stop()
+        self._xsdb_session.stop()
 
     def discover_jtag_targets(self) -> ActionResult:
-        result = self._run_xsdb(DISCOVER_JTAG_TARGETS_TCL, timeout_seconds=60)
+        result = self._run_xsdb(DISCOVER_JTAG_TARGETS_TCL, timeout_seconds=self.timeout_seconds, marker=TARGET_MARKER)
         if not result.ok:
             return result
         contexts = parse_xsdb_targets(result.stdout)
@@ -239,8 +462,7 @@ class BoardActions:
             FPGA_TARGET_ID=device_state.target_ctx.fpga_ctx,
             BITSTREAM=_tcl_path(bitstream_path),
         )
-        result = self._run_xsdb(script, timeout_seconds=self.timeout_seconds)
-        return result
+        return self._run_xsdb(script, timeout_seconds=self.timeout_seconds, marker="fpga-agent: programmed PL")
 
     def program_ps(
         self,
@@ -267,7 +489,7 @@ class BoardActions:
             ELF=_tcl_path(elf_path),
             CONTINUE_AFTER_DOWNLOAD="con" if continue_after_download else "",
         )
-        return self._run_xsdb(script, timeout_seconds=self.timeout_seconds)
+        return self._run_xsdb(script, timeout_seconds=self.timeout_seconds, marker="fpga-agent: programmed PS")
 
     def reset_board(self, *, device_state: FPGAState) -> ActionResult:
         if not device_state.target_ctx.processor_ctx:
@@ -278,16 +500,17 @@ class BoardActions:
             DAP_RESET_COMMAND=_dap_reset_command(device_state.target_ctx),
             FPGA_TARGET_ID=device_state.target_ctx.fpga_ctx,
         )
-        result = self._run_xsdb(script, timeout_seconds=90)
-        return result
+        return self._run_xsdb(script, timeout_seconds=90, marker="fpga-agent: reset complete")
 
     def read_telemetry(self, *, device_state: FPGAState) -> ActionResult:
         script = _render_template(
-            VIVADO_TELEMETRY_TCL,
+            TELEMETRY_TCL,
             CABLE=device_state.target_ctx.cable_serial,
             FPGA_NAME=device_state.target_ctx.fpga_name,
         )
         result = self._run_vivado(script, timeout_seconds=90)
+        if not result.ok:
+            return result
         payload = parse_telemetry_payload(result.stdout) or {}
         telemetry = _telemetry_from_payload(payload)
         if not telemetry:
@@ -302,22 +525,11 @@ class BoardActions:
             )
         return _with_data(result, telemetry)
 
-    def _run_xsdb(self, script: str, *, timeout_seconds: int) -> ActionResult:
-        return _run_xilinx_script(
-            executable=str(self.xsdb),
-            script=script,
-            vivado_settings=self.vivado_settings,
-            timeout_seconds=timeout_seconds,
-        )
+    def _run_xsdb(self, script: str, *, timeout_seconds: int, marker: str = COMMAND_DONE_MARKER) -> ActionResult:
+        return self._xsdb_session.run(script, timeout_seconds=timeout_seconds, marker=marker)
 
     def _run_vivado(self, script: str, *, timeout_seconds: int) -> ActionResult:
-        return _run_xilinx_script(
-            executable=self.vivado,
-            executable_args=("-mode", "batch", "-source"),
-            script=script,
-            vivado_settings=self.vivado_settings,
-            timeout_seconds=timeout_seconds,
-        )
+        return self._vivado_session.run(script, timeout_seconds=timeout_seconds, marker=TELEMETRY_MARKER)
 
 def parse_xsdb_targets(stdout: str) -> list[JTAGTargetContext]:
     contexts = []
@@ -327,7 +539,6 @@ def parse_xsdb_targets(stdout: str) -> list[JTAGTargetContext]:
         parts = line.split("\t", 6)
         if len(parts) != 7:
             continue
-
         _, cable_serial, fpga_ctx, fpga_name, processor_ctx, processor_name, dap_id = parts
         contexts.append(
             JTAGTargetContext(
@@ -339,59 +550,19 @@ def parse_xsdb_targets(stdout: str) -> list[JTAGTargetContext]:
                 dap_id=dap_id or None,
             )
         )
-
     return contexts
 
 def parse_telemetry_payload(stdout: str) -> dict[str, Any] | None:
-    """Parse the telemetry JSON emitted by the Tcl probe."""
-
     for line in stdout.splitlines():
-        line = line.strip()
-        if not line.startswith(TELEMETRY_MARKER):
+        if TELEMETRY_MARKER not in line:
             continue
         payload = line.split(TELEMETRY_MARKER, 1)[1].strip()
-
         try:
             parsed = json.loads(payload)
         except json.JSONDecodeError:
             return {"error": f"invalid JSON payload: {payload}"}
         return parsed if isinstance(parsed, dict) else {"error": "telemetry payload was not an object"}
     return None
-
-def _run_xilinx_script(
-    *,
-    executable: str,
-    script: str,
-    vivado_settings: Path,
-    timeout_seconds: int,
-    executable_args: tuple[str, ...] = (),
-) -> ActionResult:
-    vivado_settings = Path(vivado_settings).expanduser()
-    if not vivado_settings.exists():
-        return _local_error(ActionError.TOOL_MISSING, f"Vivado settings file not found: {vivado_settings}")
-    script_path = _write_temp_script(script)
-    command = ("bash", "-lc", _shell_command(vivado_settings, executable, executable_args, script_path))
-    started_at = datetime.now(UTC).isoformat()
-    try:
-        completed = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout_seconds, check=False)
-    except subprocess.TimeoutExpired as exc:
-        finished_at = datetime.now(UTC).isoformat()
-        stdout = _coerce_process_text(exc.stdout)
-        stderr = _coerce_process_text(exc.stderr)
-        return ActionResult(False, ActionError.TIMEOUT, command, stdout, stderr, started_at, finished_at)
-    finally:
-        script_path.unlink(missing_ok=True)
-    finished_at = datetime.now(UTC).isoformat()
-    error = None if completed.returncode == 0 else ActionError.COMMAND_ERROR
-    return ActionResult(
-        ok=completed.returncode == 0,
-        error=error,
-        command=command,
-        stdout=completed.stdout,
-        stderr=completed.stderr,
-        started_at=started_at,
-        finished_at=finished_at,
-    )
 
 def _local_error(error: ActionError, message: str) -> ActionResult:
     now = datetime.now(UTC).isoformat()
@@ -442,12 +613,13 @@ def _dap_reset_command(target_ctx: JTAGTargetContext) -> str:
 def _tcl_path(path: Path) -> str:
     return str(path).replace("\\", "/")
 
-def _coerce_process_text(value: str | bytes | None) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, bytes):
-        return value.decode(errors="replace")
-    return value
+def _command_done_error(stdout: str) -> str | None:
+    for line in reversed(stdout.splitlines()):
+        if line.startswith(f"{COMMAND_DONE_MARKER}\terror\t"):
+            return line.split("\t", 2)[2]
+        if line.startswith(f"{COMMAND_DONE_MARKER}\tok"):
+            return None
+    return None
 
 def _sh_quote(value: str) -> str:
     return "'" + value.replace("'", "'\\''") + "'"

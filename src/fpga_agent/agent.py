@@ -35,21 +35,41 @@ class Agent:
             logger.debug("FPGA agent is already running")
             return
         logger.info("Starting FPGA agent")
-        logger.info("Performing initial FPGA discovery")
 
-        # Discover devices
-        result = await asyncio.to_thread(
-            self._actions.discover_jtag_targets
-        )
+        logger.info("Starting persistent XSDB action session")
+        actions_start = await asyncio.to_thread(self._actions.start)
+        if not actions_start.ok:
+            logger.error(
+                "FPGA agent startup failed: XSDB action session failed to start: %s",
+                actions_start.stderr or actions_start.error,
+            )
+            return
+        logger.info("Persistent XSDB action session started")
+
+        logger.info("Starting persistent Vivado telemetry session")
+        telemetry_start = await asyncio.to_thread(self._actions.start_telemetry)
+        if not telemetry_start.ok:
+            logger.error(
+                "FPGA agent startup failed: Vivado telemetry session failed to start: %s",
+                telemetry_start.stderr or telemetry_start.error,
+            )
+            await asyncio.to_thread(self._actions.stop)
+            return
+        logger.info("Persistent Vivado telemetry session started")
+
+        logger.info("Performing initial FPGA discovery")
+        result = await asyncio.to_thread(self._actions.discover_jtag_targets)
         if not result.ok:
             logger.error(
                 "FPGA agent startup failed: initial discovery failed: %s",
                 result.stderr or result.error,
             )
+            await asyncio.to_thread(self._actions.stop)
             return
         targets = result.data or []
         if not targets:
             logger.error("FPGA agent startup failed: no FPGA devices were discovered")
+            await asyncio.to_thread(self._actions.stop)
             return
         register_jtag_discovery(targets)
         logger.info(
@@ -93,6 +113,7 @@ class Agent:
 
         self._discovery_task = None
         self._telemetry_task = None
+        await asyncio.to_thread(self._actions.stop)
         logger.info("FPGA agent stopped")
 
     def list_devices(self) -> list[FPGAState]:
