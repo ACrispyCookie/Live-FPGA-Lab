@@ -416,7 +416,7 @@ class BoardActions:
         vivado_settings: str | Path = DEFAULT_VIVADO_SETTINGS,
         xsdb: str | Path = DEFAULT_XSDB,
         vivado: str = DEFAULT_VIVADO,
-        timeout_seconds: int = 180,
+        timeout_seconds: int = 10,
     ):
         self.vivado_settings = Path(vivado_settings).expanduser()
         self.xsdb = Path(xsdb)
@@ -429,7 +429,7 @@ class BoardActions:
             startup_script=XSDB_SESSION_TCL,
             ready_marker=XSDB_READY_MARKER,
             vivado_settings=self.vivado_settings,
-            timeout_seconds=max(90, self.timeout_seconds),
+            timeout_seconds=self.timeout_seconds,
         )
         self._vivado_session = TclSession(
             name="vivado",
@@ -438,7 +438,7 @@ class BoardActions:
             startup_script=VIVADO_SESSION_TCL,
             ready_marker=VIVADO_READY_MARKER,
             vivado_settings=self.vivado_settings,
-            timeout_seconds=max(90, self.timeout_seconds),
+            timeout_seconds=self.timeout_seconds,
         )
 
     def start(self) -> ActionResult:
@@ -505,7 +505,7 @@ class BoardActions:
             DAP_RESET_COMMAND=_dap_reset_command(device_state.target_ctx),
             FPGA_TARGET_ID=device_state.target_ctx.fpga_ctx,
         )
-        return self._run_xsdb(script, timeout_seconds=90, marker="fpga-agent: reset complete")
+        return self._run_xsdb(script, timeout_seconds=self.timeout_seconds, marker="fpga-agent: reset complete")
 
     def read_telemetry(self, *, device_state: FPGAState) -> ActionResult:
         script = _render_template(
@@ -513,7 +513,7 @@ class BoardActions:
             CABLE=device_state.target_ctx.cable_serial,
             FPGA_NAME=device_state.target_ctx.fpga_name,
         )
-        result = self._run_vivado(script, timeout_seconds=90)
+        result = self._run_vivado(script, timeout_seconds=self.timeout_seconds)
         if not result.ok:
             return result
         payload = parse_telemetry_payload(result.stdout) or {}
