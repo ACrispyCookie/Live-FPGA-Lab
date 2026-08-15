@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from .agent import Agent
 from .fpga import FPGAState, FaultType
+from fastapi.responses import StreamingResponse
 
 logger = logging.getLogger("rpc")
 
@@ -75,6 +76,19 @@ def create_rpc_app(agent: Agent) -> FastAPI:
             return agent.get_device(device_id)
         except KeyError:
             raise HTTPException(404, "Unknown FPGA device")
+
+    @app.get("/devices/{device_id}/events")
+    async def device_events(device_id: str):
+        try:
+            agent.get_device(device_id)
+        except KeyError:
+            raise HTTPException(404, "Unknown FPGA device")
+
+        async def stream():
+            async for state in agent.subscribe(device_id):
+                yield f"data: {state.model_dump_json()}\n\n"
+
+        return StreamingResponse(stream(), media_type="text/event-stream")
 
     @app.post("/devices/{device_id}/pl/program", response_model=FPGAState)
     async def program_pl(device_id: str, request: ProgramPLRequest):

@@ -29,6 +29,7 @@ class Agent:
         self._running = False
         self._discovery_task: asyncio.Task | None = None
         self._telemetry_task: asyncio.Task | None = None
+        self._subscribers: dict[str, set[asyncio.Queue[FPGAState]]] = {}
         self._device_locks: dict[str, asyncio.Lock] = {}
         self._last_telemetry_log: dict[str, tuple[float | None, float]] = {}
 
@@ -129,6 +130,22 @@ class Agent:
         await asyncio.to_thread(self._actions.stop)
         logger.info("[bold yellow]╰─ FPGA agent stopped[/]")
 
+    async def subscribe(self, device_id: str):
+        device = get_fpga(device_id)
+        queue: asyncio.Queue[FPGAState] = asyncio.Queue(maxsize=1)
+        self._subscribers.setdefault(device_id, set()).add(queue)
+
+        try:
+            yield device  # immediately send current state
+            while True:
+                yield await queue.get()
+        finally:
+            subscribers = self._subscribers.get(device_id)
+            if subscribers:
+                subscribers.discard(queue)
+                if not subscribers:
+                    self._subscribers.pop(device_id, None)
+
     def list_devices(self) -> list[FPGAState]:
         return list_fpgas()
 
@@ -168,6 +185,7 @@ class Agent:
             device = clear_fault(device,FaultType.PROGRAMMING_FAILED)
             device = clear_fault(device, FaultType.COMMUNICATION_LOST)
             device = update_fpga(device, bitstream_id=bitstream_id)
+            self._publish_state(device)
             logger.info("[green]✓ pl.program[/] device=%s bitstream=%s", device_id, bitstream_id[:12])
         return device
 
@@ -210,6 +228,7 @@ class Agent:
 
             device = clear_fault(device,FaultType.PROGRAMMING_FAILED)
             device = clear_fault(device, FaultType.COMMUNICATION_LOST)
+            self._publish_state(device)
             logger.info("[green]✓ ps.program[/] device=%s", device_id)
         return device
 
@@ -235,6 +254,7 @@ class Agent:
             device = clear_fault(device,FaultType.PROGRAMMING_FAILED)
             device = clear_fault(device, FaultType.COMMUNICATION_LOST)
             device = update_fpga(device, bitstream_id=None)
+            self._publish_state(device)
             logger.info("[green]✓ board.reset[/] device=%s bitstream=cleared", device_id)
             return device
 
@@ -252,7 +272,9 @@ class Agent:
             if temperature >= self.config.over_temperature_recovery_c:
                 raise RuntimeError(f"FPGA is still too hot: {temperature:.1f} C")
 
-        return clear_fault(device, fault_type)
+        device = clear_fault(device, fault_type)
+        self._publish_state(device)
+        return device
 
     async def _discovery_loop(self) -> None:
         try:
@@ -313,6 +335,9 @@ class Agent:
         self._log_telemetry_sample(device, result.data)
         await self._evaluate_safety(device)
 
+        device = get_fpga(device.device_id)
+        self._publish_state(device)
+
     def _log_telemetry_sample(self, device: FPGAState, telemetry: FPGATelemetry) -> None:
         temperature = telemetry.temperature_c
         now = time.monotonic()
@@ -333,6 +358,15 @@ class Agent:
             device.status,
             len(device.faults),
         )
+
+    def _publish_state(self, device: FPGAState) -> None:
+        for queue in self._subscribers.get(device.device_id, set()).copy():
+            if queue.full():
+                try:
+                    queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+            queue.put_nowait(device)
 
     async def _evaluate_safety(
         self,
