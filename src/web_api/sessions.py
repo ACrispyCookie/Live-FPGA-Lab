@@ -88,16 +88,17 @@ class SessionManager:
             self._queue.append(session.id)
 
             # Someone just started waiting while the board is in use.
-            # Give the active user their handoff grace period.
+            # The active user should keep at least their minimum contended
+            # session window. If they already had that much uncontended time,
+            # give them one fresh contended window from the new user's arrival.
             active = self._active()
             if (active
                 and active.status == SessionStatus.ACTIVE
                 and active.expires_at is None
             ):
+                now = _now()
                 active = active.model_copy(update={
-                    "expires_at": _now() + timedelta(
-                        seconds=self.config.handoff_seconds,
-                    ),
+                    "expires_at": self._contended_expiry_for_active(active, now),
                 })
                 self._sessions[active.id] = active
             return session.model_copy(deep=True)
@@ -298,6 +299,15 @@ class SessionManager:
             self._queue.remove(session_id)
         except ValueError:
             pass
+
+    def _contended_expiry_for_active(self, active: DemoSession, now: datetime) -> datetime:
+        if active.started_at is None:
+            return now + timedelta(seconds=self.config.contended_session_seconds)
+
+        owed_until = active.started_at + timedelta(seconds=self.config.contended_session_seconds)
+        if now < owed_until:
+            return owed_until
+        return now + timedelta(seconds=self.config.contended_session_seconds)
 
 
 def _now() -> datetime:
