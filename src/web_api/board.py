@@ -29,10 +29,6 @@ class BoardManager:
         self._lock = asyncio.Lock()
         self._stopping = asyncio.Event()
 
-    @property
-    def available(self) -> bool:
-        return self.primary_board is not None
-
     async def start(self) -> None:
         logger.info("starting board manager")
         self._stopping.clear()
@@ -61,6 +57,14 @@ class BoardManager:
         finally:
             self._subscribers.discard(queue)
             logger.info(f"websocket unsubscribed user={user_id} subscribers={len(self._subscribers)}")
+
+    def snapshot_for(self, user_id: str) -> dict[str, Any]:
+        return {
+            "board": self._board_payload(),
+            "queue": {"items": []},
+            "session": None,
+            "demos": [],
+        }
 
     async def create_session(self, user_id: str, demo_id: str):
         raise BoardError("not_implemented", "Session creation is not implemented yet.", status_code=501)
@@ -121,14 +125,6 @@ class BoardManager:
                 stale.append(subscriber)
         for subscriber in stale:
             self._subscribers.discard(subscriber)
-
-    def _snapshot_for(self, user_id: str) -> dict[str, Any]:
-        return {
-            "board": self._board_payload(),
-            "queue": {"items": []},
-            "session": None,
-            "demos": [],
-        }
 
     def _board_payload(self) -> dict[str, Any]:
         board = self.primary_board
