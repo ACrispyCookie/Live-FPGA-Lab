@@ -85,6 +85,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "pydantic" },
     { name = "pyserial" },
     { name = "rich" },
@@ -100,6 +101,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.116.0" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.28.0" },
     { name = "pydantic", specifier = ">=2.11.0" },
     { name = "pyserial", specifier = ">=3.5" },

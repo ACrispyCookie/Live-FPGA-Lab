@@ -9,6 +9,7 @@ dependencies = [
   "pydantic>=2.11.0",
   "pyserial>=3.5",
   "rich>=15.0.0",
+  "httpx>=0.28.1",
 ]
 
 [project.optional-dependencies]
@@ -19,7 +20,7 @@ dev = [
 
 [project.scripts]
 fpga-agent = "fpga_agent.main:main"
-web-api = "web_api.cli:main"
+web-api = "web_api.main:main"
 
 [build-system]
 requires = ["hatchling"]
