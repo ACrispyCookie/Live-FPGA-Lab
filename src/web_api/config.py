@@ -14,7 +14,7 @@ class SessionConfig:
 @dataclass(frozen=True)
 class WebApiConfig:
     host: str = "0.0.0.0"
-    port: int = 8000
+    port: int = 9121
     agent_socket: Path = Path("/tmp/fpga-agent.sock")
     demo_dir: Path = Path("demos")
     user_cookie: str = "fpga_user"

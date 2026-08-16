@@ -3,9 +3,12 @@ from __future__ import annotations
 import logging
 import secrets
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from rich.logging import RichHandler
 import uvicorn
 
@@ -48,6 +51,8 @@ app = FastAPI(
 )
 app.state.config = config
 
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+
 
 @app.middleware("http")
 async def anonymous_user(request: Request, call_next):
@@ -74,6 +79,14 @@ async def anonymous_user(request: Request, call_next):
 
 
 app.include_router(create_api(board, proxy_client, config=config))
+
+
+@app.get("/", include_in_schema=False)
+async def frontend() -> FileResponse:
+    return FileResponse(STATIC_DIR / "index.html")
+
+
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 def main() -> None:
