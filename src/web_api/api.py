@@ -191,6 +191,8 @@ def create_api(board: BoardManager, proxy_client: httpx.AsyncClient, *, config: 
             headers=response_headers,
         )
 
+    return router
+
 
 def _http_user(request: Request) -> str:
     user_id = request.cookies.get(getattr(request.app.state, "config", DEFAULT_CONFIG).user_cookie)
