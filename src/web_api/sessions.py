@@ -44,6 +44,7 @@ class DemoSession(BaseModel):
 class QueueState(BaseModel):
     length: int
     position: int | None
+    active_expires_at: datetime | None = None
 
 class SessionError(Exception):
     def __init__(self, code: str, message: str):
@@ -182,6 +183,7 @@ class SessionManager:
                     "end_reason": SessionEndReason.CANCELLED,
                 })
                 self._sessions[session.id] = session
+                self._clear_active_expiry_if_queue_empty()
                 return session.model_copy(deep=True), False
 
             if session.id != self._active_id:
@@ -248,9 +250,11 @@ class SessionManager:
                     position = index
                     break
 
+            active = self._active()
             return QueueState(
                 length=len(self._queue),
                 position=position,
+                active_expires_at=active.expires_at if active else None,
             )
 
     async def queued_sessions(self) -> list[DemoSession]:
@@ -308,6 +312,16 @@ class SessionManager:
             self._queue.remove(session_id)
         except ValueError:
             pass
+
+    def _clear_active_expiry_if_queue_empty(self) -> None:
+        active = self._active()
+        if (
+            not self._queue
+            and active is not None
+            and active.status == SessionStatus.ACTIVE
+            and active.expires_at is not None
+        ):
+            self._sessions[active.id] = active.model_copy(update={"expires_at": None})
 
     def _contended_expiry_for_active(self, active: DemoSession, now: datetime) -> datetime:
         if active.started_at is None:

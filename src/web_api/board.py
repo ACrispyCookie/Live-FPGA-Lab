@@ -151,6 +151,7 @@ class BoardManager:
         return session
 
     async def end_session(self, user_id: str, session_id: str) -> DemoSession:
+        active_before = self.sessions.active
         try:
             session, needs_reset = await self.sessions.end_by_user(user_id, session_id)
         except SessionError as exc:
@@ -163,6 +164,16 @@ class BoardManager:
 
         if not needs_reset:
             await self._publish_queue_updates()
+            active_after = self.sessions.active
+            if active_after and (
+                active_before is None
+                or active_before.expires_at != active_after.expires_at
+            ):
+                await self._publish_user(active_after.user_id, {
+                    "type": "session.updated",
+                    "session": _session_json(active_after),
+                })
+                self._schedule_expiry(active_after)
             return session
 
         self._cancel_expiry()
@@ -473,6 +484,7 @@ class BoardManager:
 
         return {
             "device_id": self.device_id,
+            "device_name": self.fpga_state.target_ctx.fpga_name,
             "status": self.fpga_state.status.value,
             "telemetry": self.fpga_state.telemetry.model_dump(mode="json"),
             "faults": [
