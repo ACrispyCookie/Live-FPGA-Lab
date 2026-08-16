@@ -317,7 +317,7 @@ class BoardManager:
             "type": "session.updated",
             "session": _session_json(session),
         })
-        await self._publish_recent_sessions_update()
+        await self._publish_queue_updates()
         await self._publish_user(session.user_id, {
             "type": "ui.message",
             "level": "success",
@@ -375,6 +375,7 @@ class BoardManager:
                 "type": "session.updated",
                 "session": _session_json(ended),
             })
+        await self._publish_queue_updates()
 
         # Do not reset here. The FPGA agent owns hardware/fault recovery.
         # The queue resumes when the agent eventually reports IDLE.
@@ -486,6 +487,7 @@ class BoardManager:
             "device_id": self.device_id,
             "device_name": self.fpga_state.target_ctx.fpga_name,
             "status": self.fpga_state.status.value,
+            "bitstream_id": self.fpga_state.bitstream_id,
             "telemetry": self.fpga_state.telemetry.model_dump(mode="json"),
             "faults": [
                 fault.model_dump(mode="json")

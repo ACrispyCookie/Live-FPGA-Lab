@@ -10,3 +10,7 @@ __pycache__/
 
 # generated demo outputs
 demos/*/programs/*/data.csv
+
+# frontend dependencies
+node_modules/
+src/frontend/node_modules/
