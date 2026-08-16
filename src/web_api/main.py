@@ -86,6 +86,11 @@ async def frontend() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
 
 
+@app.get("/debug", include_in_schema=False)
+async def debug_frontend() -> FileResponse:
+    return FileResponse(STATIC_DIR / "debug.html")
+
+
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 

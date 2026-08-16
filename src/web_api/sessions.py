@@ -260,6 +260,15 @@ class SessionManager:
                 for session_id in self._queue
             ]
 
+    async def recent_sessions(self, *, limit: int = 10) -> list[DemoSession]:
+        async with self._lock:
+            sessions = sorted(
+                self._sessions.values(),
+                key=lambda session: session.created_at,
+                reverse=True,
+            )
+            return [session.model_copy(deep=True) for session in sessions[:limit]]
+
     def _active(self) -> DemoSession | None:
         if self._active_id is None:
             return None

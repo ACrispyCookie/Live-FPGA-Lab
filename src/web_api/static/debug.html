@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FPGA Demo Test Console</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #090d14;
+      --panel: #111827;
+      --panel-2: #172033;
+      --text: #e5edf7;
+      --muted: #95a3b8;
+      --accent: #7dd3fc;
+      --ok: #34d399;
+      --warn: #fbbf24;
+      --bad: #fb7185;
+      --border: #243248;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 20% 0%, rgba(125, 211, 252, 0.13), transparent 32rem),
+        radial-gradient(circle at 90% 10%, rgba(52, 211, 153, 0.08), transparent 26rem),
+        var(--bg);
+      color: var(--text);
+      font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+      background: rgba(9, 13, 20, 0.82);
+      backdrop-filter: blur(12px);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    h1 { margin: 0; font-size: 1.05rem; letter-spacing: 0.02em; }
+    main { display: grid; grid-template-columns: 23rem minmax(0, 1fr); gap: 1rem; padding: 1rem; }
+    @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+    .panel {
+      border: 1px solid var(--border);
+      background: rgba(17, 24, 39, 0.9);
+      border-radius: 16px;
+      box-shadow: 0 20px 80px rgba(0, 0, 0, 0.28);
+      overflow: hidden;
+    }
+    .panel h2 {
+      margin: 0;
+      padding: 0.85rem 1rem;
+      font-size: 0.82rem;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+      background: rgba(23, 32, 51, 0.85);
+    }
+    .content { padding: 1rem; }
+    .stack { display: grid; gap: 1rem; }
+    .row { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
+    .muted { color: var(--muted); }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.25rem 0.55rem;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      color: var(--muted);
+      font-size: 0.82rem;
+    }
+    .pill.ok { color: var(--ok); border-color: rgba(52, 211, 153, 0.35); }
+    .pill.warn { color: var(--warn); border-color: rgba(251, 191, 36, 0.35); }
+    .pill.bad { color: var(--bad); border-color: rgba(251, 113, 133, 0.35); }
+    .dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; background: currentColor; }
+    button, select {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: #0d1422;
+      color: var(--text);
+      padding: 0.7rem 0.75rem;
+      font: inherit;
+    }
+    button { cursor: pointer; font-weight: 700; }
+    button.primary { background: linear-gradient(135deg, #0ea5e9, #2563eb); border-color: rgba(125, 211, 252, 0.45); }
+    button.danger { background: linear-gradient(135deg, #dc2626, #9f1239); border-color: rgba(251, 113, 133, 0.45); }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+    dl { display: grid; grid-template-columns: auto 1fr; gap: 0.45rem 0.8rem; margin: 0; }
+    dt { color: var(--muted); }
+    dd { margin: 0; word-break: break-word; }
+    iframe {
+      display: block;
+      width: 100%;
+      min-height: 68vh;
+      border: 0;
+      background: #020617;
+    }
+    .empty {
+      min-height: 68vh;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      text-align: center;
+      padding: 2rem;
+    }
+    #messages {
+      margin: 0;
+      padding: 1rem;
+      max-height: 18rem;
+      overflow: auto;
+      background: #050914;
+      color: #cbd5e1;
+      font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      white-space: pre-wrap;
+    }
+    .split { display: grid; gap: 1rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>FPGA Demo Test Console</h1>
+    <span id="wsStatus" class="pill warn"><span class="dot"></span>connecting</span>
+  </header>
+
+  <main>
+    <aside class="stack">
+      <section class="panel">
+        <h2>Controls</h2>
+        <div class="content stack">
+          <label class="stack">
+            <span class="muted">Demo</span>
+            <select id="demoSelect"></select>
+          </label>
+          <button id="startBtn" class="primary" disabled>Start selected demo</button>
+          <button id="endBtn" class="danger" disabled>End current session</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>State</h2>
+        <div class="content stack">
+          <div class="split">
+            <span id="boardBadge" class="pill">board: ?</span>
+            <span id="sessionBadge" class="pill">session: none</span>
+          </div>
+          <dl>
+            <dt>Device</dt><dd id="deviceId">—</dd>
+            <dt>Temperature</dt><dd id="temperature">—</dd>
+            <dt>Queue</dt><dd id="queue">—</dd>
+            <dt>Session</dt><dd id="sessionId">—</dd>
+            <dt>Expires</dt><dd id="expiresAt">—</dd>
+          </dl>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Messages</h2>
+        <pre id="messages">No UI messages yet.</pre>
+      </section>
+    </aside>
+
+    <section class="panel">
+      <h2>Demo frame</h2>
+      <div id="emptyFrame" class="empty">
+        <div>
+          <strong>No active demo yet.</strong><br />
+          Pick a demo and start a session to load it here.
+        </div>
+      </div>
+      <iframe id="demoFrame" title="Demo frame" hidden></iframe>
+    </section>
+  </main>
+
+  <script>
+    const WS_PROTOCOL = 'fpga-demo.v1';
+    const state = {
+      ws: null,
+      reconnectAttempt: 0,
+      reconnectTimer: null,
+      commandSeq: 0,
+      demos: [],
+      board: null,
+      queue: null,
+      session: null,
+    };
+
+    const el = {
+      wsStatus: document.getElementById('wsStatus'),
+      demoSelect: document.getElementById('demoSelect'),
+      startBtn: document.getElementById('startBtn'),
+      endBtn: document.getElementById('endBtn'),
+      boardBadge: document.getElementById('boardBadge'),
+      sessionBadge: document.getElementById('sessionBadge'),
+      deviceId: document.getElementById('deviceId'),
+      temperature: document.getElementById('temperature'),
+      queue: document.getElementById('queue'),
+      sessionId: document.getElementById('sessionId'),
+      expiresAt: document.getElementById('expiresAt'),
+      emptyFrame: document.getElementById('emptyFrame'),
+      demoFrame: document.getElementById('demoFrame'),
+      messages: document.getElementById('messages'),
+    };
+
+    function wsUrl() {
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      return `${proto}//${location.host}/api/ws`;
+    }
+
+    function setStatus(text, kind) {
+      el.wsStatus.className = `pill ${kind || ''}`.trim();
+      el.wsStatus.innerHTML = `<span class="dot"></span>${text}`;
+    }
+
+    function connectWebSocket() {
+      clearTimeout(state.reconnectTimer);
+      setStatus(state.reconnectAttempt ? `reconnecting (${state.reconnectAttempt})` : 'connecting', 'warn');
+      const ws = new WebSocket(wsUrl(), WS_PROTOCOL);
+      state.ws = ws;
+
+      ws.addEventListener('open', () => {
+        state.reconnectAttempt = 0;
+        setStatus('connected', 'ok');
+
+      });
+
+      ws.addEventListener('message', (event) => {
+        try {
+          handleMessage(JSON.parse(event.data));
+        } catch (error) {
+          console.warn('bad websocket message', error);
+        }
+      });
+
+      ws.addEventListener('close', (event) => {
+
+        if (state.ws === ws) {
+          scheduleReconnect();
+        }
+      });
+
+      ws.addEventListener('error', () => {
+        console.warn('websocket error');
+      });
+    }
+
+    function scheduleReconnect() {
+      state.reconnectAttempt += 1;
+      const delay = Math.min(10000, 350 * 2 ** Math.min(state.reconnectAttempt, 5));
+      setStatus(`reconnecting in ${Math.round(delay / 1000)}s`, 'warn');
+      clearTimeout(state.reconnectTimer);
+      state.reconnectTimer = setTimeout(connectWebSocket, delay);
+    }
+
+    function sendCommand(type, payload = {}) {
+      if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
+        appendMessage('warning', 'WebSocket is not connected; trying to reconnect.');
+        scheduleReconnect();
+        return;
+      }
+      const request_id = `${Date.now()}-${++state.commandSeq}`;
+      state.ws.send(JSON.stringify({type, request_id, ...payload}));
+
+    }
+
+    function handleMessage(message) {
+      switch (message.type) {
+        case 'state.initial':
+          state.board = message.board;
+          state.demos = message.demos || [];
+          state.queue = message.queue;
+          state.session = message.session;
+          break;
+        case 'board.updated':
+          state.board = message.board;
+          break;
+        case 'queue.updated':
+          state.queue = message.queue;
+          break;
+        case 'session.updated':
+          state.session = message.session;
+          break;
+        case 'command.result':
+          if (!message.ok) {
+            appendMessage('error', `${message.error?.code || 'error'}: ${message.error?.message || 'failed'}`);
+          }
+          break;
+        case 'ui.message':
+          appendMessage(message.level || 'info', message.message || '');
+          break;
+      }
+      render();
+    }
+
+    function render() {
+      renderDemos();
+      const boardStatus = state.board?.status || 'unknown';
+      el.boardBadge.textContent = `board: ${boardStatus}`;
+      el.boardBadge.className = `pill ${boardStatus === 'idle' || boardStatus === 'running' ? 'ok' : boardStatus === 'fault' ? 'bad' : 'warn'}`;
+      el.deviceId.textContent = state.board?.device_id || '—';
+      el.temperature.textContent = state.board?.telemetry?.temperature_c == null ? '—' : `${state.board.telemetry.temperature_c.toFixed(1)} °C`;
+
+      const queue = state.queue || {};
+      el.queue.textContent = `length ${queue.length ?? 0}${queue.position ? `, you are #${queue.position}` : ''}`;
+
+      const session = state.session;
+      el.sessionBadge.textContent = `session: ${session?.status || 'none'}`;
+      el.sessionBadge.className = `pill ${session?.status === 'active' ? 'ok' : session ? 'warn' : ''}`;
+      el.sessionId.textContent = session?.id || '—';
+      el.expiresAt.textContent = session?.expires_at ? new Date(session.expires_at).toLocaleTimeString() : '—';
+      const hasLiveSession = session && session.status !== 'ended';
+      el.endBtn.disabled = !hasLiveSession;
+      el.startBtn.disabled = !state.demos.length || hasLiveSession;
+
+      if (session?.status === 'active' && session.demo_url) {
+        if (el.demoFrame.getAttribute('src') !== session.demo_url) {
+          el.demoFrame.src = session.demo_url;
+        }
+        el.emptyFrame.hidden = true;
+        el.demoFrame.hidden = false;
+      } else {
+        el.demoFrame.hidden = true;
+        el.emptyFrame.hidden = false;
+        el.demoFrame.removeAttribute('src');
+      }
+    }
+
+    function renderDemos() {
+      const selected = el.demoSelect.value;
+      el.demoSelect.innerHTML = '';
+      for (const demo of state.demos) {
+        const option = document.createElement('option');
+        option.value = demo.id;
+        option.textContent = demo.description ? `${demo.name} — ${demo.description}` : demo.name;
+        el.demoSelect.append(option);
+      }
+      if (selected && state.demos.some((demo) => demo.id === selected)) {
+        el.demoSelect.value = selected;
+      }
+    }
+
+    function appendMessage(level, message) {
+      if (!message) return;
+      const line = `[${new Date().toLocaleTimeString()}] ${level}: ${message}`;
+      const current = el.messages.textContent === 'No UI messages yet.' ? '' : el.messages.textContent;
+      el.messages.textContent = `${current}${current ? '\n' : ''}${line}`.slice(-12000);
+      el.messages.scrollTop = el.messages.scrollHeight;
+    }
+
+    el.startBtn.addEventListener('click', () => {
+      const demo_id = el.demoSelect.value;
+      if (demo_id) sendCommand('session.create', {demo_id});
+    });
+
+    el.endBtn.addEventListener('click', () => {
+      if (state.session?.id) sendCommand('session.end', {session_id: state.session.id});
+    });
+
+    window.addEventListener('online', connectWebSocket);
+    window.addEventListener('beforeunload', () => {
+      clearTimeout(state.reconnectTimer);
+      if (state.ws) state.ws.close(1000, 'page unloading');
+    });
+
+    render();
+    connectWebSocket();
+  </script>
+</body>
+</html>

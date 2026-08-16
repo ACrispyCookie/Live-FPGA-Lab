@@ -101,6 +101,10 @@ class BoardManager:
             "demos": [self._public_demo(demo) for demo in self.demos.values()],
             "queue": (await self.sessions.queue_for_user(user_id)).model_dump(mode="json"),
             "session": _session_json(await self.sessions.session_for_user(user_id)),
+            "recent_sessions": [
+                _session_json(session)
+                for session in await self.sessions.recent_sessions()
+            ],
         }
 
     async def subscribe(self, user_id: str) -> AsyncIterator[dict[str, Any]]:
@@ -302,6 +306,7 @@ class BoardManager:
             "type": "session.updated",
             "session": _session_json(session),
         })
+        await self._publish_recent_sessions_update()
         await self._publish_user(session.user_id, {
             "type": "ui.message",
             "level": "success",
@@ -439,6 +444,16 @@ class BoardManager:
                 "type": "queue.updated",
                 "queue": queue.model_dump(mode="json"),
             })
+        await self._publish_recent_sessions_update()
+
+    async def _publish_recent_sessions_update(self) -> None:
+        await self._broadcast({
+            "type": "recent_sessions.updated",
+            "sessions": [
+                _session_json(session)
+                for session in await self.sessions.recent_sessions()
+            ],
+        })
 
     async def _broadcast(self, event: dict[str, Any]) -> None:
         for user_id in list(self._subscribers):
