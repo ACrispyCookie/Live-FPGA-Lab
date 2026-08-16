@@ -3,7 +3,9 @@ from __future__ import annotations
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
+import logging
 
+from rich.logging import RichHandler
 import httpx
 import uvicorn
 from fastapi import FastAPI, Request
@@ -11,6 +13,15 @@ from fastapi import FastAPI, Request
 from .agent_client import AgentClient
 from .api import USER_COOKIE, create_api
 from .board import BoardManager
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(message)s",
+    datefmt="[%X]",
+    handlers=[RichHandler(rich_tracebacks=True, markup=True, show_path=True)],
+)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 AGENT_SOCKET = Path("/tmp/fpga-agent.sock")
 

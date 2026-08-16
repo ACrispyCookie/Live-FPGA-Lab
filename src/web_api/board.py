@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import suppress
@@ -10,6 +11,7 @@ from fpga_agent.fpga import FPGAState
 
 from .agent_client import AgentClient
 
+logger = logging.getLogger("board")
 
 class BoardError(RuntimeError):
     def __init__(self, code: str, message: str, *, status_code: int = 400):
@@ -32,16 +34,16 @@ class BoardManager:
         return self.primary_board is not None
 
     async def start(self) -> None:
-        print("[web-api:board] starting board manager", flush=True)
+        logger.info("starting board manager")
         self._stopping.clear()
         await self._discover_primary_board()
         if self.primary_board is None:
-            print("[web-api:board] no FPGA devices discovered by agent", flush=True)
+            logger.info("no FPGA devices discovered by agent")
             return
         self._subscriber_task = asyncio.create_task(self._subscribe_primary_board())
 
     async def stop(self) -> None:
-        print("[web-api:board] stopping board manager", flush=True)
+        logger.info("stopping board manager")
         self._stopping.set()
         if self._subscriber_task is not None:
             self._subscriber_task.cancel()
@@ -52,13 +54,13 @@ class BoardManager:
     async def subscribe(self, user_id: str) -> AsyncIterator[dict[str, Any]]:
         queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=64)
         self._subscribers.add(queue)
-        print(f"[web-api:board] websocket subscribed user={user_id} subscribers={len(self._subscribers)}", flush=True)
+        logger.info(f"websocket subscribed user={user_id} subscribers={len(self._subscribers)}")
         try:
             while True:
                 yield await queue.get()
         finally:
             self._subscribers.discard(queue)
-            print(f"[web-api:board] websocket unsubscribed user={user_id} subscribers={len(self._subscribers)}", flush=True)
+            logger.info(f"websocket unsubscribed user={user_id} subscribers={len(self._subscribers)}")
 
     async def create_session(self, user_id: str, demo_id: str):
         raise BoardError("not_implemented", "Session creation is not implemented yet.", status_code=501)
@@ -84,7 +86,7 @@ class BoardManager:
         board = await self.agent.get_device(device_id)
         async with self._lock:
             self.primary_board = board
-        print(f"[web-api:board] selected primary board device={board.device_id} status={board.status} faults={len(board.faults)}",flush=True)
+        logger.info(f"selected primary board device={board.device_id} status={board.status} faults={len(board.faults)}")
         await self._publish_board_updated()
 
     async def _subscribe_primary_board(self) -> None:
@@ -101,7 +103,7 @@ class BoardManager:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                print(f"[web-api:board] agent event subscription failed device={device_id}: {exc}", flush=True)
+                logger.info(f"agent event subscription failed device={device_id}: {exc}")
                 await asyncio.sleep(1.0)
 
     async def _apply_agent_update(self, update: FPGAState) -> None:
