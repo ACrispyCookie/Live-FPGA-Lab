@@ -8,12 +8,20 @@ import time
 from pathlib import Path
 from typing import Any
 
-DEMO = {
+DEMO_DEFINITION = {
     "id": "gpgpu-nbody",
     "name": "GPGPU n-body simulator",
+    "description": "Interactive n-body simulation running through the ZYNQ PS/PL GPGPU demo stack.",
+    "bitstream": "bitstream/gpgpu_system_hello.bit",
+    "ps7_init_tcl": "boot/ps7_init.tcl",
+    "elf": "boot/gpgpu_app.elf",
+}
+
+DEMO = {
+    **DEMO_DEFINITION,
     "kind": "zynq-ps-pl",
     "board": "HelloFPGA ZYNQ7000",
-    "summary": "Interactive n-body simulation running through the ZYNQ PS/PL GPGPU demo stack.",
+    "summary": DEMO_DEFINITION["description"],
     "available": True,
     "placeholder": False,
 }

@@ -10,6 +10,8 @@ from typing import Any
 from fpga_agent.fpga import FPGAState, FPGAStatus
 
 from .agent_client import AgentClient
+from .config import WebApiConfig
+from .demo_loader import DemoDefinition, load_demos
 from .sessions import (
     DemoSession,
     SessionEndReason,
@@ -32,12 +34,14 @@ class BoardManager:
     def __init__(
         self,
         agent: AgentClient,
-        demos: dict[str, Any],
+        config: WebApiConfig | None = None,
+        demos: dict[str, DemoDefinition] | None = None,
         sessions: SessionManager | None = None,
     ):
+        self.config = config or WebApiConfig()
         self.agent = agent
-        self.demos = demos
-        self.sessions = sessions or SessionManager()
+        self.demos = demos if demos is not None else load_demos(self.config.demo_dir)
+        self.sessions = sessions or SessionManager(self.config.session)
 
         self.device_id: str | None = None
         self.fpga_state: FPGAState | None = None
@@ -190,6 +194,12 @@ class BoardManager:
         await self._try_start_next()
 
         return ended or session
+
+    def demo_backend_for(self, user_id: str, session_id: str) -> str:
+        raise BoardError("not_implemented", "Demo proxy is not implemented yet.", status_code=501)
+
+    def artifact_for(self, user_id: str, session_id: str, name: str):
+        raise BoardError("not_implemented", "Artifact serving is not implemented yet.", status_code=501)
 
     async def _watch_agent(self) -> None:
         assert self.device_id is not None

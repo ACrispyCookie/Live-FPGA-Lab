@@ -3,11 +3,12 @@ from __future__ import annotations
 import asyncio
 import secrets
 from collections import deque
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import Enum
 
 from pydantic import BaseModel
+
+from .config import SessionConfig
 
 
 class SessionStatus(str, Enum):
@@ -23,6 +24,8 @@ class SessionEndReason(str, Enum):
     CANCELLED = "cancelled"
     EXPIRED = "expired"
     FPGA_FAULT = "fpga_fault"
+    BOARD_OFFLINE = "board_offline"
+    PROGRAMMING_FAILED = "programming_failed"
 
 
 class DemoSession(BaseModel):
@@ -41,13 +44,6 @@ class DemoSession(BaseModel):
 class QueueState(BaseModel):
     length: int
     position: int | None
-
-
-@dataclass(frozen=True)
-class SessionConfig:
-    contended_session_seconds: int = 5 * 60
-    handoff_seconds: int = 1 * 60
-
 
 class SessionError(Exception):
     def __init__(self, code: str, message: str):

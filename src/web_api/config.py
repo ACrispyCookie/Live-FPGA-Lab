@@ -6,15 +6,23 @@ from pathlib import Path
 
 
 @dataclass(frozen=True)
+class SessionConfig:
+    contended_session_seconds: int = 5 * 60
+    handoff_seconds: int = 1 * 60
+
+
+@dataclass(frozen=True)
 class WebApiConfig:
     host: str = "0.0.0.0"
     port: int = 8000
     agent_socket: Path = Path("/tmp/fpga-agent.sock")
+    demo_dir: Path = Path("demos")
     user_cookie: str = "fpga_user"
     cookie_max_age_seconds: int = 60 * 60 * 12
     cookie_secure: bool = False
     cookie_samesite: str = "lax"
     ws_protocol: str = "fpga-demo.v1"
+    session: SessionConfig = SessionConfig()
 
     @classmethod
     def from_env(cls) -> "WebApiConfig":
@@ -22,11 +30,22 @@ class WebApiConfig:
             host=os.environ.get("WEB_API_HOST", cls.host),
             port=_env_int("WEB_API_PORT", cls.port),
             agent_socket=Path(os.environ.get("WEB_API_AGENT_SOCKET", str(cls.agent_socket))),
+            demo_dir=Path(os.environ.get("WEB_API_DEMO_DIR", str(cls.demo_dir))),
             user_cookie=os.environ.get("WEB_API_USER_COOKIE", cls.user_cookie),
             cookie_max_age_seconds=_env_int("WEB_API_COOKIE_MAX_AGE_SECONDS", cls.cookie_max_age_seconds),
             cookie_secure=_env_bool("WEB_API_COOKIE_SECURE", cls.cookie_secure),
             cookie_samesite=os.environ.get("WEB_API_COOKIE_SAMESITE", cls.cookie_samesite),
             ws_protocol=os.environ.get("WEB_API_WS_PROTOCOL", cls.ws_protocol),
+            session=SessionConfig(
+                contended_session_seconds=_env_int(
+                    "WEB_API_SESSION_CONTENDED_SECONDS",
+                    cls.session.contended_session_seconds,
+                ),
+                handoff_seconds=_env_int(
+                    "WEB_API_SESSION_HANDOFF_SECONDS",
+                    cls.session.handoff_seconds,
+                ),
+            ),
         )
 
 

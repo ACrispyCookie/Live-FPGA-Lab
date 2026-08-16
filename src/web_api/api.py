@@ -10,7 +10,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, Response
 
-from .board import BoardError, BoardManager, config
+from .board import BoardError, BoardManager
 from .config import WebApiConfig
 
 logger = logging.getLogger("api")
@@ -52,7 +52,7 @@ def create_api(board: BoardManager, proxy_client: httpx.AsyncClient, *, config: 
         outgoing: asyncio.Queue[dict] = asyncio.Queue(maxsize=64)
         await outgoing.put({
             "type": "state.initial",
-            **board.snapshot_for(user_id),
+            **(await board.snapshot_for(user_id)),
         })
 
         async def sender():
