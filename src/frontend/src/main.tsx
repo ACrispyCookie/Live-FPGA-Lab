@@ -217,7 +217,7 @@ function SkeletonPage({ state }: { state: WsState }) {
     <main className="shell skeleton-shell">
       <header className="topbar">
         <div>
-          <h1>LabRack FPGA</h1>
+          <h1>Live FPGA Lab</h1>
           <p>{state === 'reconnecting' ? 'Connection lost. Reconnecting…' : 'Connecting to the homelab board…'}</p>
         </div>
         <Pill tone="warn">{titleCase(state)}</Pill>

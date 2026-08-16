@@ -191,23 +191,6 @@ def create_api(board: BoardManager, proxy_client: httpx.AsyncClient, *, config: 
             headers=response_headers,
         )
 
-    @router.get("/sessions/{session_id}/artifacts/{name}")
-    async def artifact(request: Request, session_id: str, name: str):
-        user_id = _http_user(request)
-
-        try:
-            path = board.artifact_for(user_id, session_id, name)
-        except BoardError as exc:
-            raise HTTPException(exc.status_code, str(exc))
-
-        path = Path(path)
-        if not path.is_file():
-            raise HTTPException(404, "Artifact not found")
-
-        return FileResponse(path)
-
-    return router
-
 
 def _http_user(request: Request) -> str:
     user_id = request.cookies.get(getattr(request.app.state, "config", DEFAULT_CONFIG).user_cookie)

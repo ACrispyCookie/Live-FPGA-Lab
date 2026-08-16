@@ -213,9 +213,6 @@ class BoardManager:
     def demo_backend_for(self, user_id: str, session_id: str) -> str:
         raise BoardError("not_implemented", "Demo proxy is not implemented yet.", status_code=501)
 
-    def artifact_for(self, user_id: str, session_id: str, name: str):
-        raise BoardError("not_implemented", "Artifact serving is not implemented yet.", status_code=501)
-
     async def _watch_agent(self) -> None:
         assert self.device_id is not None
 
