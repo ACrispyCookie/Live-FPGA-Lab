@@ -200,10 +200,8 @@ function App() {
               <p>{sessionHelp}</p>
             </div>
           </div>
-          {liveSession?.status === 'active' && liveSession.demo_url ? (
+          {liveSession?.status === 'active' && liveSession.demo_url && (
             <iframe title={`${selectedDemo?.name || 'Demo'} iframe`} src={liveSession.demo_url} />
-          ) : (
-            <div className="iframe-placeholder">Demo iframe appears here when your session becomes active.</div>
           )}
         </Section>
       </div>
