@@ -10,12 +10,14 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, Response
 
-from .board import BoardError, BoardManager
+from .board import BoardError, BoardManager, config
+from .config import WebApiConfig
 
 logger = logging.getLogger("api")
 
-USER_COOKIE = "fpga_user"
-WS_PROTOCOL = "fpga-demo.v1"
+DEFAULT_CONFIG = WebApiConfig()
+USER_COOKIE = DEFAULT_CONFIG.user_cookie
+WS_PROTOCOL = DEFAULT_CONFIG.ws_protocol
 
 HOP_BY_HOP_HEADERS = {
     "connection",
@@ -28,7 +30,7 @@ HOP_BY_HOP_HEADERS = {
     "upgrade",
 }
 
-def create_api(board: BoardManager, proxy_client: httpx.AsyncClient) -> APIRouter:
+def create_api(board: BoardManager, proxy_client: httpx.AsyncClient, *, config: WebApiConfig = DEFAULT_CONFIG) -> APIRouter:
     router = APIRouter(prefix="/api")
 
     @router.get("/status")
@@ -40,12 +42,12 @@ def create_api(board: BoardManager, proxy_client: httpx.AsyncClient) -> APIRoute
 
     @router.websocket("/ws")
     async def websocket(ws: WebSocket):
-        user_id = ws.cookies.get(USER_COOKIE)
+        user_id = ws.cookies.get(config.user_cookie)
         if not user_id:
             await ws.close(code=1008, reason="Missing anonymous user")
             return
 
-        await ws.accept(subprotocol=WS_PROTOCOL if WS_PROTOCOL in ws.headers.get("sec-websocket-protocol", "") else None)
+        await ws.accept(subprotocol=config.ws_protocol if config.ws_protocol in ws.headers.get("sec-websocket-protocol", "") else None)
 
         outgoing: asyncio.Queue[dict] = asyncio.Queue(maxsize=64)
         await outgoing.put({
@@ -208,7 +210,7 @@ def create_api(board: BoardManager, proxy_client: httpx.AsyncClient) -> APIRoute
 
 
 def _http_user(request: Request) -> str:
-    user_id = request.cookies.get(USER_COOKIE)
+    user_id = request.cookies.get(getattr(request.app.state, "config", DEFAULT_CONFIG).user_cookie)
     if not user_id:
         raise HTTPException(401, "Missing anonymous user")
     return user_id

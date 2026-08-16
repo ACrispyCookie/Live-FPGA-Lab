@@ -1,18 +1,18 @@
 from __future__ import annotations
 
+import logging
 import secrets
 from contextlib import asynccontextmanager
-from pathlib import Path
-import logging
 
-from rich.logging import RichHandler
 import httpx
-import uvicorn
 from fastapi import FastAPI, Request
+from rich.logging import RichHandler
+import uvicorn
 
 from .agent_client import AgentClient
-from .api import USER_COOKIE, create_api
+from .api import create_api
 from .board import BoardManager
+from .config import WebApiConfig
 
 logging.basicConfig(
     level=logging.INFO,
@@ -23,11 +23,11 @@ logging.basicConfig(
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
-AGENT_SOCKET = Path("/tmp/fpga-agent.sock")
-
-agent = AgentClient(AGENT_SOCKET)
+config = WebApiConfig.from_env()
+agent = AgentClient(config.agent_socket)
 proxy_client = httpx.AsyncClient()
 board = BoardManager(agent)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -39,16 +39,19 @@ async def lifespan(app: FastAPI):
         await agent.close()
         await proxy_client.aclose()
 
+
 app = FastAPI(
     title="FPGA Demo API",
     docs_url=None,
     redoc_url=None,
     lifespan=lifespan,
 )
+app.state.config = config
+
 
 @app.middleware("http")
 async def anonymous_user(request: Request, call_next):
-    user_id = request.cookies.get(USER_COOKIE)
+    user_id = request.cookies.get(config.user_cookie)
     created = user_id is None
 
     if created:
@@ -59,25 +62,28 @@ async def anonymous_user(request: Request, call_next):
 
     if created:
         response.set_cookie(
-            USER_COOKIE,
+            config.user_cookie,
             user_id,
             httponly=True,
-            samesite="lax",
-            secure=False,  # True behind HTTPS
-            max_age=60 * 60 * 12,
+            samesite=config.cookie_samesite,
+            secure=config.cookie_secure,
+            max_age=config.cookie_max_age_seconds,
         )
 
     return response
 
-app.include_router(create_api(board, proxy_client))
+
+app.include_router(create_api(board, proxy_client, config=config))
+
 
 def main() -> None:
     uvicorn.run(
         "web_api.main:app",
-        host="0.0.0.0",
-        port=8000,
+        host=config.host,
+        port=config.port,
         access_log=False,
     )
+
 
 if __name__ == "__main__":
     main()
