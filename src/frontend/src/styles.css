@@ -150,6 +150,11 @@ p { margin: 6px 0 0; color: var(--muted); }
   line-height: 1;
   font-variant-numeric: tabular-nums;
 }
+.queue-count strong.queue-empty, .eta-card strong.queue-empty {
+  font-size: clamp(28px, 3.4vw, 42px);
+  letter-spacing: -.035em;
+  line-height: 1.05;
+}
 .queue-count span, .eta-card span { display: block; margin-bottom: 12px; color: var(--muted); font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
 .queue-count small { display: block; margin-top: 10px; color: var(--muted); font-size: 14px; font-weight: 800; }
 .eta-card { background: linear-gradient(135deg, rgba(124,140,255,.14), rgba(70,194,255,.08)); }

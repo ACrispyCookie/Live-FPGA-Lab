@@ -135,7 +135,8 @@ function App() {
   const sessionHelp = sessionCopy(liveSession, activeTimeLeft, queueEta);
   const isActiveUser = liveSession?.status === 'active';
   const queueDisplayEta = !hasBoardFault && !isActiveUser && queue.position ? queueEta : null;
-  const queueEtaLabel = hasBoardFault ? 'Fault detected' : duration(queueDisplayEta);
+  const queuePlaceLabel = !isActiveUser && queue.position ? String(queue.position) : 'No place';
+  const queueEtaLabel = hasBoardFault ? 'Fault detected' : queueDisplayEta == null ? 'No ETA available' : duration(queueDisplayEta);
   const queueBarPct = !hasBoardFault && !isActiveUser && queue.position && queueDisplayEta != null
     ? Math.max(0, Math.min(100, (queueDisplayEta / Math.max(1, queue.position * CONTENDED_SECONDS)) * 100))
     : 0;
@@ -184,8 +185,8 @@ function App() {
         <div className="queue-column">
           <Section title="Queue" className="queue-section">
             <div className="queue-panel">
-              <div className="queue-count"><span>Your place</span><strong>{isActiveUser ? '—' : queue.position ?? '—'}</strong><small>/ {queue.length} users</small></div>
-              <div className={`eta-card ${hasBoardFault ? 'fault' : ''}`}><span>ETA</span><strong>{queueEtaLabel}</strong><div className="queue-progress"><div style={{ width: `${queueBarPct}%` }} /></div></div>
+              <div className="queue-count"><span>Your place</span><strong className={queue.position && !isActiveUser ? undefined : 'queue-empty'}>{queuePlaceLabel}</strong><small>{queue.length} user{queue.length === 1 ? '' : 's'} waiting</small></div>
+              <div className={`eta-card ${hasBoardFault ? 'fault' : ''}`}><span>ETA</span><strong className={queueDisplayEta == null ? 'queue-empty' : undefined}>{queueEtaLabel}</strong><div className="queue-progress"><div style={{ width: `${queueBarPct}%` }} /></div></div>
             </div>
           </Section>
           <RecentSessions sessions={recentSessions} demos={demos} />
