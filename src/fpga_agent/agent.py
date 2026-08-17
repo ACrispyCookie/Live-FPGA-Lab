@@ -6,8 +6,8 @@ import time
 from pathlib import Path
 from datetime import datetime
 
-from .actions import BoardActions, ActionResult, ActionError
-from .fpga import register_jtag_discovery, list_fpgas, update_fpga, add_fault, clear_fault, get_fpga, FPGAState, FPGATelemetry, FaultType
+from .actions import BoardActions, ActionResult
+from .fpga import register_jtag_discovery, list_fpgas, update_fpga, add_fault, clear_fault, get_fpga, FPGAState, FPGATelemetry, FaultType, ProgrammingPurpose
 
 logger = logging.getLogger('agent')
 
@@ -164,33 +164,34 @@ class Agent:
         self,
         device_id: str,
         bitstream: str | Path,
+        *,
+        purpose: ProgrammingPurpose = ProgrammingPurpose.DEMO,
     ) -> FPGAState:
         device = get_fpga(device_id)
-        if not device.can_program():
-            raise RuntimeError(f"FPGA {device_id!r} cannot currently be programmed")
+        if not device.can_program(purpose):
+            raise RuntimeError(f"FPGA {device_id!r} cannot be programmed for {purpose.value} use")
         lock = self._get_device_lock(device_id)
 
         async with lock:
             # Get current state again after acquiring the lock.
             device = get_fpga(device_id)
-            if not device.can_program():
-                raise RuntimeError(f"FPGA {device_id!r} cannot currently be programmed")
-            logger.info("[blue]▶ pl.program[/] device=%s bitstream=%s", device_id, bitstream)
+            if not device.can_program(purpose):
+                raise RuntimeError(f"FPGA {device_id!r} cannot be programmed for {purpose.value} use")
+            logger.info("[blue]▶ pl.program[/] device=%s purpose=%s bitstream=%s", device_id, purpose.value, bitstream)
             result = await asyncio.to_thread(self._actions.program_pl, bitstream, device_state=device)
 
-            # State may have changed while the tool was running.
             device = get_fpga(device_id)
             if not result.ok:
                 device = add_fault(device, FaultType.PROGRAMMING_FAILED)
-                logger.error("[bold red]✖ pl.program[/] device=%s error=%s detail=%s", device_id, result.error, result.stderr)
+                logger.error(
+                    "[bold red]✖ pl.program[/] device=%s purpose=%s error=%s detail=%s", device_id, purpose.value, result.error, result.stderr)
                 raise RuntimeError(result.stderr or "PL programming failed")
-            
             bitstream_id = _sha256_file(Path(bitstream).expanduser().resolve())
-            device = clear_fault(device,FaultType.PROGRAMMING_FAILED)
+            device = clear_fault(device, FaultType.PROGRAMMING_FAILED)
             device = clear_fault(device, FaultType.COMMUNICATION_LOST)
             device = update_fpga(device, bitstream_id=bitstream_id)
             self._publish_state(device)
-            logger.info("[green]✓ pl.program[/] device=%s bitstream=%s", device_id, bitstream_id[:12])
+            logger.info("[green]✓ pl.program[/] device=%s purpose=%s bitstream=%s", device_id, purpose.value, bitstream_id[:12])
         return device
 
 
@@ -202,18 +203,18 @@ class Agent:
         elf: str | Path,
         reset_processor: bool = True,
         continue_after_download: bool = True,
+        purpose: ProgrammingPurpose = ProgrammingPurpose.DEMO,
     ) -> FPGAState:
         device = get_fpga(device_id)
-        if not device.can_program():
-            raise RuntimeError(f"FPGA {device_id!r} cannot currently be programmed")
+        if not device.can_program(purpose):
+            raise RuntimeError(f"FPGA {device_id!r} cannot be programmed for {purpose.value} use")
         lock = self._get_device_lock(device_id)
-
         async with lock:
             # Get current state again after acquiring the lock.
             device = get_fpga(device_id)
-            if not device.can_program():
-                raise RuntimeError(f"FPGA {device_id!r} cannot currently be programmed")
-            logger.info("[blue]▶ ps.program[/] device=%s elf=%s", device_id, elf)
+            if not device.can_program(purpose):
+                raise RuntimeError(f"FPGA {device_id!r} cannot be reset for {purpose.value} use")
+            logger.info("[blue]▶ ps.program[/] device=%s purpose=%s elf=%s", device_id, purpose.value, elf)
             result = await asyncio.to_thread(
                 self._actions.program_ps,
                 device_state=device,
@@ -239,8 +240,12 @@ class Agent:
     async def reset_board(
         self,
         device_id: str,
+        *,
+        purpose: ProgrammingPurpose = ProgrammingPurpose.DEMO,
     ) -> FPGAState:
         device = get_fpga(device_id)
+        if not device.can_program(purpose):
+            raise RuntimeError(f"FPGA {device_id!r} cannot be reset for {purpose.value} use")
         lock = self._get_device_lock(device_id)
 
         async with lock:

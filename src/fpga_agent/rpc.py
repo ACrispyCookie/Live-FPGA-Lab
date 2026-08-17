@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
 from .agent import Agent
-from .fpga import FPGAState, FaultType
+from .fpga import FPGAState, FaultType, ProgrammingPurpose
 from fastapi.responses import StreamingResponse
 
 logger = logging.getLogger("rpc")
@@ -15,6 +15,7 @@ logger = logging.getLogger("rpc")
 
 class ProgramPLRequest(BaseModel):
     bitstream: str
+    purpose: ProgrammingPurpose = ProgrammingPurpose.DEMO
 
 
 class ProgramPSRequest(BaseModel):
@@ -22,7 +23,10 @@ class ProgramPSRequest(BaseModel):
     elf: str
     reset_processor: bool = True
     continue_after_download: bool = True
+    purpose: ProgrammingPurpose = ProgrammingPurpose.DEMO
 
+class ResetRequest(BaseModel):
+    purpose: ProgrammingPurpose = ProgrammingPurpose.DEMO
 
 class ClearFaultRequest(BaseModel):
     fault_type: FaultType
@@ -97,7 +101,7 @@ def create_rpc_app(agent: Agent) -> FastAPI:
     @app.post("/devices/{device_id}/pl/program", response_model=FPGAState)
     async def program_pl(device_id: str, request: ProgramPLRequest):
         try:
-            return await agent.program_pl(device_id, Path(request.bitstream))
+            return await agent.program_pl(device_id, Path(request.bitstream), purpose=request.purpose)
         except KeyError:
             raise HTTPException(404, "Unknown FPGA device")
         except RuntimeError as exc:
@@ -112,6 +116,7 @@ def create_rpc_app(agent: Agent) -> FastAPI:
                 elf=Path(request.elf),
                 reset_processor=request.reset_processor,
                 continue_after_download=request.continue_after_download,
+                purpose=request.purpose,
             )
         except KeyError:
             raise HTTPException(404, "Unknown FPGA device")
@@ -119,9 +124,14 @@ def create_rpc_app(agent: Agent) -> FastAPI:
             raise HTTPException(409, str(exc))
 
     @app.post("/devices/{device_id}/reset", response_model=FPGAState)
-    async def reset_board(device_id: str):
+    async def reset_board(
+        device_id: str,
+        request: ResetRequest | None = None,
+    ):
+        purpose = request.purpose if request else ProgrammingPurpose.DEMO
+
         try:
-            return await agent.reset_board(device_id)
+            return await agent.reset_board(device_id, purpose=purpose)
         except KeyError:
             raise HTTPException(404, "Unknown FPGA device")
         except RuntimeError as exc:

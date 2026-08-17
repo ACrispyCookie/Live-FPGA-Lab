@@ -66,6 +66,10 @@ class FPGAFault(BaseModel):
     bitstream_id: str | None = None
     telemetry: FPGATelemetry | None = None
 
+class ProgrammingPurpose(str, Enum):
+    DEMO = "demo"
+    PROJECT = "project"
+
 class JTAGTargetContext(BaseModel):
     """XSDB target identifiers needed to select one physical FPGA board."""
 
@@ -93,14 +97,21 @@ class FPGAState(BaseModel):
         if any(
             fault.type == FaultType.COMMUNICATION_LOST
             for fault in self.faults
-        ): 
+        ):
             return FPGAStatus.OFFLINE
-        elif self.reserved_for_projects:
-            return FPGAStatus.RESERVED_FOR_PROJECTS
-        elif not self.can_program():
+
+        if any(
+            FAULT_POLICIES[fault.type].blocks_programming
+            for fault in self.faults
+        ):
             return FPGAStatus.FAULT
-        elif self.bitstream_id:
+
+        if self.reserved_for_projects:
+            return FPGAStatus.RESERVED_FOR_PROJECTS
+
+        if self.bitstream_id:
             return FPGAStatus.RUNNING
+
         return FPGAStatus.IDLE
 
     
@@ -109,14 +120,17 @@ class FPGAState(BaseModel):
         return self.target_ctx.cable_serial
 
 
-    def can_program(self) -> bool:
-        if self.reserved_for_projects:
-            return False
-
-        return not any(
+    def can_program(self, purpose: ProgrammingPurpose = ProgrammingPurpose.DEMO) -> bool:
+        if any(
             FAULT_POLICIES[fault.type].blocks_programming
             for fault in self.faults
-        )
+        ):
+            return False
+
+        if purpose == ProgrammingPurpose.PROJECT:
+            return self.reserved_for_projects
+
+        return not self.reserved_for_projects
 
 
 _FPGA_STATES: dict[str, FPGAState] = {}
