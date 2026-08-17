@@ -27,7 +27,9 @@ type Session = {
 } | null;
 
 type WsState = 'connecting' | 'connected' | 'reconnecting';
+type Toast = { id: string; level: 'info' | 'success' | 'warn' | 'error'; message: string };
 const CONTENDED_SECONDS = 300;
+const TOAST_TTL_MS = 5200;
 
 function titleCase(value?: string | null) {
   return String(value || 'unknown').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
@@ -53,10 +55,12 @@ function App() {
   const [queue, setQueue] = useState<QueueState>({ length: 0, position: null, active_expires_at: null });
   const [session, setSession] = useState<Session>(null);
   const [recentSessions, setRecentSessions] = useState<NonNullable<Session>[]>([]);
+  const [toasts, setToasts] = useState<Toast[]>([]);
   const [nowTick, setNowTick] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
   const demoFrameRef = useRef<HTMLIFrameElement | null>(null);
   const retryRef = useRef<number | undefined>(undefined);
+  const toastTimersRef = useRef<Record<string, number>>({});
   const attemptsRef = useRef(0);
   const requestRef = useRef(0);
 
@@ -64,6 +68,19 @@ function App() {
     const timer = window.setInterval(() => setNowTick((n) => n + 1), 1000);
     return () => window.clearInterval(timer);
   }, []);
+
+  function removeToast(id: string) {
+    const timer = toastTimersRef.current[id];
+    if (timer) window.clearTimeout(timer);
+    delete toastTimersRef.current[id];
+    setToasts((items) => items.filter((toast) => toast.id !== id));
+  }
+
+  function addToast(message: string, level: Toast['level'] = 'info') {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    setToasts((items) => [...items.slice(-3), { id, level, message }]);
+    toastTimersRef.current[id] = window.setTimeout(() => removeToast(id), TOAST_TTL_MS);
+  }
 
   useEffect(() => {
     let closed = false;
@@ -94,6 +111,7 @@ function App() {
           if (msg.session) setRecentSessions((sessions) => mergeSession(sessions, msg.session));
         }
         if (msg.type === 'recent_sessions.updated') setRecentSessions(msg.sessions || []);
+        if (msg.type === 'ui.message') addToast(String(msg.message || 'Update received.'), toastLevel(msg.level));
       });
       ws.addEventListener('close', () => {
         if (closed || wsRef.current !== ws) return;
@@ -108,6 +126,8 @@ function App() {
     return () => {
       closed = true;
       window.clearTimeout(retryRef.current);
+      Object.values(toastTimersRef.current).forEach((timer) => window.clearTimeout(timer));
+      toastTimersRef.current = {};
       wsRef.current?.close(1000, 'page unload');
     };
   }, []);
@@ -155,6 +175,8 @@ function App() {
   const isActiveDemoPage = isActiveUser && Boolean(liveSession?.demo_url);
 
   return (
+    <>
+    <ToastStack toasts={toasts} onDismiss={removeToast} />
     <main className={`shell ${isActiveDemoPage ? 'active-session-page' : ''}`}>
       <header className="topbar">
         <div>
@@ -227,9 +249,28 @@ function App() {
         </Section>
       </div>
     </main>
+    </>
   );
 }
 
+function ToastStack({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id: string) => void }) {
+  if (!toasts.length) return null;
+  return (
+    <div className="toast-stack" role="status" aria-live="polite">
+      {toasts.map((toast) => (
+        <button
+          key={toast.id}
+          className={`toast toast-${toast.level}`}
+          onClick={() => onDismiss(toast.id)}
+          title="Dismiss notification"
+        >
+          <span className="toast-dot" />
+          <span>{toast.message}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
 
 function SkeletonPage({ state }: { state: WsState }) {
   return (
@@ -324,6 +365,12 @@ function formatTemp(board: Board) {
 function runningDemoLabel(session: NonNullable<Session> | null, demo?: Demo) {
   if (session?.status === 'active' || session?.status === 'starting') return demo?.name || titleCase(session.demo_id);
   return 'No demo running';
+}
+
+function toastLevel(value: unknown): Toast['level'] {
+  if (value === 'success' || value === 'warn' || value === 'error' || value === 'info') return value;
+  if (value === 'warning') return 'warn';
+  return 'info';
 }
 
 function healthSummary(tone: string, faults: Array<{ type?: string; message?: string }>, reserved = false) {

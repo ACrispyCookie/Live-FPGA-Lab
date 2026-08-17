@@ -20,23 +20,26 @@ DEMO_DEFINITION = {
 
 UART_PORT = "/dev/ttyUSB1"
 BAUD = 115200
+BIND = "0.0.0.0"
+PORT = 9130
 
 
 def start_session(*, demo, session_id: str) -> dict[str, Any]:
-    port = _free_port()
+    port = PORT
 
     command = [
         sys.executable,
         str(demo.root / "demo" / "interactive_3d.py"),
         "--port", UART_PORT,
         "--baud", str(BAUD),
+        "--dataset", "rings",
         "--imem", str(
             demo.root
             / "programs"
             / "nbody-3d"
             / "nbody-3d_instructions.mem"
         ),
-        "--http-host", "127.0.0.1",
+        "--http-host", BIND,
         "--http-port", str(port),
         "--no-browser",
     ]
@@ -57,7 +60,7 @@ def start_session(*, demo, session_id: str) -> dict[str, Any]:
         if _port_open(port):
             return {
                 "process": process,
-                "backend": f"http://127.0.0.1:{port}",
+                "backend": f"http://{BIND}:{port}",
             }
 
         time.sleep(0.1)
@@ -80,17 +83,10 @@ def stop_session(runtime: dict[str, Any]) -> None:
         process.kill()
         process.wait()
 
-
-def _free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
-
-
 def _port_open(port: int) -> bool:
     try:
         with socket.create_connection(
-            ("127.0.0.1", port),
+            (BIND, port),
             timeout=0.2,
         ):
             return True

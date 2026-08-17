@@ -504,32 +504,66 @@ HTML = r"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
 <title>Interactive FPGA nbody-3d</title>
 <style>
-  :root { color-scheme: dark; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-  body { margin: 0; background: #050816; color: #e5e7eb; display: grid; grid-template-columns: minmax(720px, 1fr) 360px; height: 100vh; overflow: hidden; }
-  #view { position: relative; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; }
-  #view canvas { display: block; width: 100%; height: 100%; }
+  :root { color-scheme: dark; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; --panel:#0f172a; --line:#273244; --muted:#9ca3af; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; background: #050816; color: #e5e7eb; }
+  body { display: grid; grid-template-columns: minmax(720px, 1fr) 360px; height: 100dvh; overflow: hidden; overscroll-behavior: none; }
+  #view { position: relative; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; touch-action: none; }
+  #view canvas { display: block; width: 100%; height: 100%; touch-action: none; }
   #view .overlay { position: absolute; left: 14px; bottom: 14px; right: 14px; padding: 10px 12px; border: 1px solid #334155; border-radius: 8px; background: rgba(15,23,42,.78); color: #cbd5e1; font-size: 13px; pointer-events: none; }
   #view .overlay.error { border-color: #ef4444; color: #fecaca; background: rgba(69,10,10,.86); }
-  aside { border-left: 1px solid #273244; padding: 18px; background: linear-gradient(180deg, #0f172a 0%, #0b1020 100%); overflow: auto; box-shadow: -18px 0 42px rgba(0,0,0,.35); }
-  button { background: #1f6feb; color: white; border: 0; border-radius: 8px; padding: 10px 12px; margin: 4px; cursor: pointer; font-weight: 700; }
+  aside { border-left: 1px solid var(--line); padding: 18px; padding-bottom: max(18px, env(safe-area-inset-bottom)); background: linear-gradient(180deg, var(--panel) 0%, #0b1020 100%); overflow: auto; -webkit-overflow-scrolling: touch; box-shadow: -18px 0 42px rgba(0,0,0,.35); }
+  h1 { margin: 0 0 12px; font-size: clamp(20px, 4vw, 28px); line-height: 1.05; }
+  h2 { margin: 16px 0 8px; font-size: 16px; }
+  button { min-height: 46px; background: #1f6feb; color: white; border: 0; border-radius: 10px; padding: 11px 12px; margin: 0; cursor: pointer; font-weight: 800; font-size: 14px; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+  button:active { transform: translateY(1px); filter: brightness(1.12); }
   button.secondary { background: #334155; }
   button.warn { background: #a16207; }
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  .metric { padding: 10px; border: 1px solid #263348; border-radius: 8px; background: #111827; margin: 8px 0; }
-  .label { color: #9ca3af; font-size: 12px; }
+  .controls-grid { margin-bottom: 10px; }
+  .metric { padding: 10px; border: 1px solid #263348; border-radius: 10px; background: #111827; margin: 8px 0; }
+  .metrics-grid .metric { margin: 0; }
+  .label { color: var(--muted); font-size: 12px; }
   .value { color: #f8fafc; font-size: 18px; margin-top: 4px; word-break: break-word; }
   kbd { background:#1f2937; border:1px solid #4b5563; border-bottom-width:2px; padding:2px 6px; border-radius:4px; }
-  .hint { color:#9ca3af; font-size: 13px; line-height: 1.45; }
+  .hint { color:var(--muted); font-size: 13px; line-height: 1.45; }
+  .mobile-hint { display: none; }
+  @media (max-width: 860px) {
+    body { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
+    #view { flex: 1 1 auto; min-height: 44dvh; height: auto; border-bottom: 1px solid var(--line); }
+    #view .overlay { left: 10px; right: 10px; bottom: 10px; font-size: 12px; }
+    aside { flex: 0 0 auto; max-height: 48dvh; border-left: 0; border-top: 1px solid var(--line); padding: 12px; box-shadow: 0 -16px 34px rgba(0,0,0,.35); }
+    .controls-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    button { min-height: 50px; border-radius: 12px; font-size: 15px; }
+    .metrics-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    .metric { padding: 9px; }
+    .value { font-size: 15px; }
+    .desktop-help { display: none; }
+    .mobile-hint { display: block; margin: 8px 0 10px; }
+  }
+  @media (max-width: 520px) {
+    #view { min-height: 40dvh; }
+    aside { max-height: 54dvh; }
+    .controls-grid { grid-template-columns: 1fr 1fr; }
+    .metrics-grid { grid-template-columns: 1fr 1fr; }
+    h1 { font-size: 20px; }
+    #trailfade, #fadefaster, #fadeslower, #clear { font-size: 13px; }
+  }
+  @media (orientation: landscape) and (max-height: 520px) {
+    body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 38vw); }
+    #view { height: 100dvh; border-bottom: 0; }
+    aside { max-height: 100dvh; border-top: 0; border-left: 1px solid var(--line); }
+  }
 </style>
 </head>
 <body>
 <div id="view"></div>
 <aside>
   <h1>nbody-3d FPGA interactive</h1>
-  <div class="grid">
+  <div class="grid controls-grid">
     <button id="play">▶ Play/Pause</button>
     <button id="step1" class="secondary">Step 1</button>
     <button id="stepspeed" class="secondary">Step speed</button>
@@ -542,7 +576,7 @@ HTML = r"""<!doctype html>
     <button id="clear" class="warn">Clear trail</button>
   </div>
   <div class="metric"><div class="label">Status</div><div id="status" class="value">connecting...</div></div>
-  <div class="grid">
+  <div class="grid metrics-grid">
     <div class="metric"><div class="label">Backend</div><div id="backend" class="value">?</div></div>
     <div class="metric"><div class="label">Step</div><div id="step" class="value">0</div></div>
     <div class="metric"><div class="label">Steps/frame</div><div id="spf" class="value">1</div></div>
@@ -551,6 +585,8 @@ HTML = r"""<!doctype html>
     <div class="metric"><div class="label">Trail frames</div><div id="frames" class="value">0</div></div>
     <div class="metric"><div class="label">Trail fade window</div><div id="fadesteps" class="value">80 steps</div></div>
   </div>
+  <p class="hint mobile-hint">One-finger drag rotates the view. Pinch zooms. Use the large buttons below for playback and stepping.</p>
+  <div class="desktop-help">
   <h2>Mouse</h2>
   <p class="hint">Drag to rotate/orbit. Scroll wheel zooms through three.js OrbitControls.</p>
   <h2>Keyboard</h2>
@@ -562,6 +598,7 @@ HTML = r"""<!doctype html>
   <p><kbd>,</kbd>/<kbd>.</kbd> fade faster/slower</p>
   <p><kbd>+</kbd>/<kbd>-</kbd> change steps per frame</p>
   <p><kbd>[</kbd>/<kbd>]</kbd> change target FPS</p>
+  </div>
 </aside>
 <script type="importmap">
 {
@@ -604,7 +641,7 @@ try {
   showOverlay(`Could not create WebGL renderer: ${err && err.message ? err.message : err}. Try enabling browser hardware acceleration/WebGL.`, true);
   throw err;
 }
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, window.innerWidth <= 860 ? 1.5 : 2));
 // Do not leave an inline 1px x 1px CSS size on the canvas.  resize() below
 // sets the real display size.  If this first setSize updates style, the later
 // resize(..., false) path can leave the canvas visibly stuck at 1x1.

@@ -325,6 +325,51 @@ iframe { display: block; }
   color: var(--muted);
   text-align: center;
 }
+.toast-stack {
+  position: fixed;
+  top: max(18px, env(safe-area-inset-top));
+  right: max(18px, env(safe-area-inset-right));
+  z-index: 50;
+  width: min(380px, calc(100vw - 28px));
+  display: grid;
+  gap: 10px;
+  pointer-events: none;
+}
+.toast {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 10px 1fr;
+  gap: 12px;
+  align-items: start;
+  padding: 14px 15px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(14,17,23,.94);
+  color: var(--text);
+  text-align: left;
+  font-size: 14px;
+  line-height: 1.35;
+  font-weight: 800;
+  box-shadow: 0 18px 70px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.06);
+  backdrop-filter: blur(18px);
+  pointer-events: auto;
+  animation: toast-in .18s ease-out;
+}
+.toast:hover { transform: translateY(-1px); }
+.toast-dot {
+  width: 10px;
+  height: 10px;
+  margin-top: 4px;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 0 20px currentColor;
+}
+.toast-info { color: var(--blue); border-color: rgba(70,194,255,.30); }
+.toast-success { color: var(--ok); border-color: rgba(53,208,127,.35); }
+.toast-warn { color: var(--warn); border-color: rgba(247,185,85,.35); }
+.toast-error { color: var(--bad); border-color: rgba(255,107,122,.35); }
+.toast span:last-child { color: var(--text); overflow-wrap: anywhere; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(-8px) scale(.98); } to { opacity: 1; transform: none; } }
 .skeleton-shell .section, .skeleton-shell .topbar { position: relative; overflow: hidden; }
 .skeleton-section { min-height: 180px; }
 .skeleton-lines, .skeleton-cards { display: grid; gap: 12px; }
@@ -359,6 +404,7 @@ iframe { display: block; }
 @media (max-width: 760px) {
   .shell { width: min(100% - 20px, 1320px); margin: 10px auto; gap: 12px; }
   .active-session-page { width: 100%; margin: 0; gap: 0; }
+  .toast-stack { top: max(10px, env(safe-area-inset-top)); right: 10px; left: 10px; width: auto; }
   .topbar { align-items: flex-start; flex-direction: column; }
   .section, .topbar { padding: 18px; border-radius: 22px; }
   .status-panel { padding: 14px; margin: 0 0 14px; }

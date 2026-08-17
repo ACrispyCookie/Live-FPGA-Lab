@@ -211,6 +211,11 @@ class BoardManager:
                 })
 
             ended = await self.sessions.finish_active()
+            await self._publish_user(user_id, {
+                "type": "ui.message",
+                "level": "success",
+                "message": "Demo ended."
+            })
 
         if ended:
             await self._publish_user(ended.user_id, {

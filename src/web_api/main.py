@@ -28,7 +28,7 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 config = WebApiConfig.from_env()
 agent = AgentClient(config.agent_socket)
-proxy_client = httpx.AsyncClient()
+proxy_client = httpx.AsyncClient(timeout=httpx.Timeout(5.0, read=None))
 board = BoardManager(agent, config=config)
 
 
