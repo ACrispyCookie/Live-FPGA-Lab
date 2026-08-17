@@ -351,13 +351,13 @@ The `web-api` Dockerfile builds the React frontend first, then copies the genera
 On the x86 host:
 
 1. Install Docker Engine and Docker Compose.
-2. Install/mount Xilinx/Vivado so this file exists inside the `fpga-agent` container:
+2. Install/mount Xilinx/Vivado so this file exists inside the `fpga-agent` container at the same absolute path as the host:
 
    ```text
-   /opt/Xilinx/2025.2/Vivado/settings64.sh
+   /home/njason/Xilinx/2025.2/Vivado/settings64.sh
    ```
 
-   The Compose file does this by mounting the host path from `HOST_XILINX_DIR` to `/opt/Xilinx` read-only.
+   The Compose file does this by mounting the host path from `HOST_XILINX_DIR` back to the same path read-only. Avoid remapping Xilinx to a different container path like `/opt/Xilinx`; generated `settings64.sh` files can source sibling files by absolute install path.
 3. Plug in the FPGA JTAG/USB cable and the demo UART device.
 4. Confirm the UART device path, usually:
 
@@ -377,7 +377,7 @@ Edit at least these values:
 
 ```env
 HOST_XILINX_DIR=/home/njason/Xilinx
-FPGA_AGENT_VIVADO_SETTINGS=/opt/Xilinx/2025.2/Vivado/settings64.sh
+FPGA_AGENT_VIVADO_SETTINGS=/home/njason/Xilinx/2025.2/Vivado/settings64.sh
 HOST_DEMO_UART=/dev/ttyUSB1
 WEB_API_PUBLISHED_PORT=9121
 ```

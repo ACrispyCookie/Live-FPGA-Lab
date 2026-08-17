@@ -61,3 +61,7 @@ def main() -> None:
         access_log=False,
         log_config=None,
     )
+
+
+if __name__ == "__main__":
+    main()

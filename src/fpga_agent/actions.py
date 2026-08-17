@@ -21,6 +21,7 @@ logger = logging.getLogger("actions")
 DEFAULT_VIVADO_SETTINGS = Path(os.environ.get("FPGA_AGENT_VIVADO_SETTINGS", "~/Xilinx/2025.2/Vivado/settings64.sh")).expanduser()
 DEFAULT_XSDB = Path(os.environ.get("FPGA_AGENT_XSDB", "xsdb"))
 DEFAULT_VIVADO = os.environ.get("FPGA_AGENT_VIVADO", "vivado")
+DEFAULT_TOOL_TIMEOUT_SECONDS = int(os.environ.get("FPGA_AGENT_TOOL_TIMEOUT_SECONDS", "120"))
 TELEMETRY_MARKER = "FPGA_AGENT_TELEMETRY_JSON:"
 TARGET_MARKER = "FPGA_AGENT_TARGET"
 COMMAND_DONE_MARKER = "FPGA_AGENT_COMMAND_DONE"
@@ -394,7 +395,7 @@ class BoardActions:
         vivado_settings: str | Path = DEFAULT_VIVADO_SETTINGS,
         xsdb: str | Path = DEFAULT_XSDB,
         vivado: str = DEFAULT_VIVADO,
-        timeout_seconds: int = 10,
+        timeout_seconds: int = DEFAULT_TOOL_TIMEOUT_SECONDS,
     ):
         self.vivado_settings = Path(vivado_settings).expanduser()
         self.xsdb = Path(xsdb)

@@ -16,3 +16,4 @@ node_modules/
 src/frontend/node_modules/
 src/web_api/static
 !src/web_api/debug.html
+.env

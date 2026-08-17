@@ -14,6 +14,7 @@ class AgentClient:
         self._client = httpx.AsyncClient(
             transport=httpx.AsyncHTTPTransport(uds=self.socket),
             base_url="http://fpga-agent",
+            timeout=httpx.Timeout(5.0, read=None),
         )
 
     async def close(self) -> None:

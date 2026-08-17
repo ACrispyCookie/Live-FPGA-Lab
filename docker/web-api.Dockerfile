@@ -28,10 +28,10 @@ RUN apt-get update \
 
 COPY pyproject.toml ./
 COPY src src
-COPY demos demos
 COPY --from=frontend-build /app/src/web_api/static src/web_api/static
 
 RUN pip install --no-cache-dir .
 
 EXPOSE 9121 9130
+VOLUME ["/app/demos"]
 CMD ["python", "-m", "web_api.main"]

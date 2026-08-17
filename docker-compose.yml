@@ -9,10 +9,11 @@ services:
     init: true
     privileged: true
     environment:
-      FPGA_AGENT_SOCKET: ${FPGA_AGENT_SOCKET:/run/fpga-agent/fpga-agent.sock}
-      FPGA_AGENT_VIVADO_SETTINGS: ${FPGA_AGENT_VIVADO_SETTINGS:-/opt/Xilinx/2025.2/Vivado/settings64.sh}
+      FPGA_AGENT_SOCKET: ${FPGA_AGENT_SOCKET:-/run/fpga-agent/fpga-agent.sock}
+      FPGA_AGENT_VIVADO_SETTINGS: ${FPGA_AGENT_VIVADO_SETTINGS:-/home/njason/Xilinx/2025.2/Vivado/settings64.sh}
       FPGA_AGENT_XSDB: ${FPGA_AGENT_XSDB:-xsdb}
       FPGA_AGENT_VIVADO: ${FPGA_AGENT_VIVADO:-vivado}
+      FPGA_AGENT_TOOL_TIMEOUT_SECONDS: ${FPGA_AGENT_TOOL_TIMEOUT_SECONDS:-120}
       FPGA_DISCOVERY_INTERVAL_SECONDS: ${FPGA_DISCOVERY_INTERVAL_SECONDS:-10}
       FPGA_TELEMETRY_INTERVAL_SECONDS: ${FPGA_TELEMETRY_INTERVAL_SECONDS:-2}
       FPGA_OVER_TEMPERATURE_C: ${FPGA_OVER_TEMPERATURE_C:-75}
@@ -22,11 +23,13 @@ services:
       LM_LICENSE_FILE: ${LM_LICENSE_FILE:-}
     volumes:
       - fpga-agent-run:/run/fpga-agent
-      # Mount the host Xilinx install read-only. Adjust HOST_XILINX_DIR in .env.
-      - ${HOST_XILINX_DIR:-/home/njason/Xilinx}:/opt/Xilinx:ro
+      # Mount Xilinx at the same absolute path used on the host. Xilinx
+      # settings64.sh may source sibling files by absolute install paths.
+      - ${HOST_XILINX_DIR:-/home/njason/Xilinx}:${HOST_XILINX_DIR:-/home/njason/Xilinx}:ro
       # Give Vivado/XSDB access to USB/JTAG adapters. privileged=true is kept
       # because Xilinx cable drivers often need broad USB/udev access.
       - /dev/bus/usb:/dev/bus/usb
+      - ${DEMO_HOST_DIR:-/home/njason/demos}:/app/demos
     healthcheck:
       test: ["CMD-SHELL", "test -S /run/fpga-agent/fpga-agent.sock"]
       interval: 10s
@@ -50,7 +53,7 @@ services:
     environment:
       WEB_API_HOST: 0.0.0.0
       WEB_API_PORT: 9121
-      WEB_API_AGENT_SOCKET: ${FPGA_AGENT_SOCKET:/run/fpga-agent/fpga-agent.sock}
+      WEB_API_AGENT_SOCKET: ${FPGA_AGENT_SOCKET:-/run/fpga-agent/fpga-agent.sock}
       WEB_API_DEMO_DIR: /app/demos
       WEB_API_COOKIE_SECURE: ${WEB_API_COOKIE_SECURE:-false}
       WEB_API_COOKIE_SAMESITE: ${WEB_API_COOKIE_SAMESITE:-lax}
@@ -65,6 +68,7 @@ services:
       - fpga-agent-run:/run/fpga-agent
       # Needed by the current gpgpu-nbody demo runtime when web-api launches it.
       - ${DEMO_UART_PORT:-/dev/ttyUSB1}:${DEMO_UART_PORT:-/dev/ttyUSB1}
+      - ${DEMO_HOST_DIR:-/home/njason/demos}:/app/demos
     devices:
       - ${DEMO_UART_PORT:-/dev/ttyUSB1}:${DEMO_UART_PORT:-/dev/ttyUSB1}
     healthcheck:

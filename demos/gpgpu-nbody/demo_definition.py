@@ -21,7 +21,7 @@ DEMO_DEFINITION = {
 
 UART_PORT = os.environ.get("DEMO_UART_PORT", "/dev/ttyUSB1")
 BAUD = int(os.environ.get("DEMO_UART_BAUD", "115200"))
-HTTP_HOST = os.environ.get("DEMO_HTTP_HOST", "0.0.0.0")
+HTTP_HOST = os.environ.get("DEMO_HTTP_HOST", "127.0.0.1")
 HTTP_PORT = os.environ.get("DEMO_HTTP_PORT")
 
 
@@ -93,7 +93,7 @@ def _free_port() -> int:
 def _port_open(port: int) -> bool:
     try:
         with socket.create_connection(
-            (HTTP_HOST, port),
+            ("127.0.0.1", port),
             timeout=0.2,
         ):
             return True
