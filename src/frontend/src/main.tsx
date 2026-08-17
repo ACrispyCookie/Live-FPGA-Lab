@@ -54,6 +54,7 @@ function App() {
   const [recentSessions, setRecentSessions] = useState<NonNullable<Session>[]>([]);
   const [nowTick, setNowTick] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
+  const demoFrameRef = useRef<HTMLIFrameElement | null>(null);
   const retryRef = useRef<number | undefined>(undefined);
   const attemptsRef = useRef(0);
   const requestRef = useRef(0);
@@ -116,6 +117,10 @@ function App() {
     ws.send(JSON.stringify({ type, request_id: `${Date.now()}-${++requestRef.current}`, ...payload }));
   }
 
+  function fullscreenDemo() {
+    demoFrameRef.current?.requestFullscreen?.();
+  }
+
   const liveSession = session && session.status !== 'ended' ? session : null;
   const activeTimeLeft = liveSession?.status === 'active' ? secondsUntil(liveSession.expires_at) : null;
   const queueEta = useMemo(() => {
@@ -145,8 +150,10 @@ function App() {
     return <SkeletonPage state={wsState} />;
   }
 
+  const isActiveDemoPage = isActiveUser && Boolean(liveSession?.demo_url);
+
   return (
-    <main className="shell">
+    <main className={`shell ${isActiveDemoPage ? 'active-session-page' : ''}`}>
       <header className="topbar">
         <div>
           <h1>Live FPGA Lab</h1>
@@ -181,7 +188,7 @@ function App() {
         </Section>
       </div>
 
-      <div className="lower-grid">
+      <div className={`lower-grid ${isActiveDemoPage ? 'active-demo-layout' : ''}`}>
         <div className="queue-column">
           <Section title="Queue" className="queue-section">
             <div className="queue-panel">
@@ -192,17 +199,28 @@ function App() {
           <RecentSessions sessions={recentSessions} demos={demos} />
         </div>
 
-        <Section title="Demo status" className="status-section">
+        <Section title="Demo status" className={`status-section ${isActiveDemoPage ? 'active-demo-status' : ''}`}>
           <div className="status-panel">
             <div className="status-orb"><span className={sessionTone(liveSession?.status)} /></div>
             <div className="status-copy">
-              <div className="status-topline"><Pill tone={sessionTone(liveSession?.status)}>{sessionLabel(liveSession)}</Pill><button className="danger end-button" disabled={!liveSession} onClick={() => liveSession && send('session.end', { session_id: liveSession.id })}>End</button></div>
-              <h2>{selectedDemo?.name || 'No demo running'}</h2>
-              <p>{sessionHelp}</p>
+              <div className="status-topline">
+                <div className="status-text-stack">
+                  <Pill tone={sessionTone(liveSession?.status)}>{sessionLabel(liveSession)}</Pill>
+                  <h2>{selectedDemo?.name || 'No demo running'}</h2>
+                  <p>{sessionHelp}</p>
+                </div>
+                <div className="status-actions">
+                  <button className="success open-demo-button" disabled={liveSession?.status !== 'active' || !liveSession.demo_url} onClick={() => liveSession?.demo_url && window.open(liveSession.demo_url, '_blank', 'noopener,noreferrer')}>Open in new tab</button>
+                  <button className="danger end-button" disabled={!liveSession} onClick={() => liveSession && send('session.end', { session_id: liveSession.id })}>End</button>
+                </div>
+              </div>
             </div>
           </div>
           {liveSession?.status === 'active' && liveSession.demo_url && (
-            <iframe title={`${selectedDemo?.name || 'Demo'} iframe`} src={liveSession.demo_url} />
+            <div className="demo-frame-wrap">
+              <button className="secondary fullscreen-button" aria-label="Fullscreen demo" title="Fullscreen" onClick={fullscreenDemo}>⛶</button>
+              <iframe ref={demoFrameRef} title={`${selectedDemo?.name || 'Demo'} iframe`} src={liveSession.demo_url} />
+            </div>
           )}
         </Section>
       </div>

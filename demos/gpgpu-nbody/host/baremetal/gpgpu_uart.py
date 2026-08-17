@@ -109,16 +109,54 @@ class GpgpuUartMonitor:
     def __init__(self, port: str, baud: int = 115200, timeout: float = 2.0, verbose: bool = False):
         if serial is None:
             raise RuntimeError("pyserial is required for UART access. Install it with `pip install pyserial`.")
-        self.ser = serial.Serial(port, baudrate=baud, timeout=timeout)
         self.verbose = verbose
         self.rx_buffer = bytearray()
-        time.sleep(0.2)
+        self.ser = serial.Serial(
+            port=None,
+            baudrate=baud,
+            timeout=timeout,
+            rtscts=False,
+            dsrdtr=False,
+        )
+        self.ser.port = port
+        self.ser.open()
+        self._set_control_lines_safe()
         self.flush()
+        self.sync_prompt(attempts=2, timeout=2.0)
+
+    def _set_control_lines_safe(self) -> None:
+        """Keep USB-UART control lines from disturbing the target when possible."""
+        try:
+            self.ser.dtr = False
+            self.ser.rts = False
+        except Exception:
+            if self.verbose:
+                print("[WARN] Could not force DTR/RTS low", flush=True)
 
     def flush(self) -> None:
         self.rx_buffer.clear()
         self.ser.reset_input_buffer()
         self.ser.reset_output_buffer()
+
+    def sync_prompt(self, attempts: int = 2, timeout: float = 2.0) -> str:
+        """Synchronize with the baremetal monitor before sending bulk data."""
+        last_error: Exception | None = None
+        for attempt in range(1, attempts + 1):
+            self.rx_buffer.clear()
+            self.ser.reset_input_buffer()
+            self.write_line("help")
+            try:
+                return self.wait_prompt(timeout=timeout)
+            except TimeoutError as exc:
+                last_error = exc
+                if self.verbose:
+                    print(
+                        f"[WARN] UART prompt sync attempt {attempt}/{attempts} timed out",
+                        flush=True,
+                    )
+        raise TimeoutError(
+            f"Timed out syncing UART monitor prompt after {attempts} attempt(s)"
+        ) from last_error
 
     def close(self) -> None:
         self.ser.close()

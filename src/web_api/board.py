@@ -53,6 +53,8 @@ class BoardManager:
         self._expiry_task: asyncio.Task | None = None
         self._flow_lock = asyncio.Lock()
 
+        self._demo_runtime: dict[str, Any] | None = None
+
         self._subscribers: dict[str, set[asyncio.Queue[dict[str, Any]]]] = {}
 
     @property
@@ -86,6 +88,8 @@ class BoardManager:
     async def stop(self) -> None:
         self._running = False
         self._cancel_expiry()
+
+        await self._stop_demo_runtime()
 
         if self._watch_task:
             self._watch_task.cancel()
@@ -186,6 +190,8 @@ class BoardManager:
                     "message": "Ending demo...",
                 })
 
+                await self._stop_demo_runtime()
+
                 if self.device_id:
                     await self.agent.reset(self.device_id)
 
@@ -210,8 +216,52 @@ class BoardManager:
 
         return ended or session
 
-    def demo_backend_for(self, user_id: str, session_id: str) -> str:
-        raise BoardError("not_implemented", "Demo proxy is not implemented yet.", status_code=501)
+    async def demo_backend_for(
+        self,
+        user_id: str,
+        session_id: str,
+    ) -> str:
+        try:
+            session = await self.sessions.get(session_id)
+        except SessionError as exc:
+            raise BoardError(
+                exc.code,
+                str(exc),
+                status_code=404,
+            ) from exc
+
+        if session.user_id != user_id:
+            raise BoardError(
+                "session_not_owned",
+                "Session does not belong to this user.",
+                status_code=403,
+            )
+
+        if session.status != SessionStatus.ACTIVE:
+            raise BoardError(
+                "session_not_active",
+                "Session is not active.",
+                status_code=409,
+            )
+
+        runtime = self._demo_runtime
+        if runtime is None or runtime["session_id"] != session_id:
+            raise BoardError(
+                "demo_unavailable",
+                "Demo runtime is not available.",
+                status_code=503,
+            )
+
+        backend = runtime.get("backend")
+        if not backend:
+            raise BoardError(
+                "demo_unavailable",
+                "Demo has no HTTP backend.",
+                status_code=503,
+            )
+
+        return str(backend)
+
 
     async def _watch_agent(self) -> None:
         assert self.device_id is not None
@@ -279,8 +329,11 @@ class BoardManager:
         })
         try:
             await self._program_demo(demo)
+            await self._start_demo_runtime(demo, session)
         except Exception:
             logger.exception("failed to start demo session=%s", session.id)
+
+            await self._stop_demo_runtime()
 
             active = self.sessions.active
             if active and active.id == session.id and active.status == SessionStatus.STARTING:
@@ -296,16 +349,21 @@ class BoardManager:
                     "message": "Failed to start demo.",
                 })
 
+            await self._reset_board_after_start_failure(session)
+            await self._publish_queue_updates()
+            await self._try_start_next()
             return
 
         # The board may have faulted while programming was in progress.
         active = self.sessions.active
         if not active or active.id != session.id or active.status != SessionStatus.STARTING:
+            await self._stop_demo_runtime()
             return
 
         try:
             session = await self.sessions.activate(session.id)
         except SessionError:
+            await self._stop_demo_runtime()
             return
 
         self._schedule_expiry(session)
@@ -342,12 +400,75 @@ class BoardManager:
                 elf=elf,
             )
 
+    async def _reset_board_after_start_failure(self, session: DemoSession) -> None:
+        if not self.device_id:
+            return
+
+        try:
+            self.fpga_state = await self.agent.reset(self.device_id)
+            await self._broadcast({
+                "type": "board.updated",
+                "board": self._public_board(),
+            })
+        except Exception:
+            logger.exception(
+                "failed to reset board after demo startup failure session=%s",
+                session.id,
+            )
+            await self._publish_user(session.user_id, {
+                "type": "ui.message",
+                "level": "error",
+                "message": "Board reset failed after demo startup failed.",
+            })
+
+    async def _start_demo_runtime(
+        self,
+        demo: DemoDefinition,
+        session: DemoSession,
+    ) -> None:
+        if demo.start_session is None:
+            return
+
+        runtime = await asyncio.to_thread(
+            demo.start_session,
+            demo=demo,
+            session_id=session.id,
+        )
+
+        self._demo_runtime = {
+            "session_id": session.id,
+            "user_id": session.user_id,
+            "demo": demo,
+            **runtime,
+        }
+
+    async def _stop_demo_runtime(self) -> None:
+        runtime = self._demo_runtime
+        self._demo_runtime = None
+
+        if runtime is None:
+            return
+
+        demo = runtime["demo"]
+        if demo.stop_session is None:
+            return
+
+        try:
+            await asyncio.to_thread(demo.stop_session, runtime)
+        except Exception:
+            logger.exception(
+                "failed to stop demo runtime session=%s",
+                runtime["session_id"],
+            )
+
     async def _end_for_board_problem(self, reason: SessionEndReason) -> None:
         self._cancel_expiry()
 
         session = await self.sessions.begin_active_end(reason)
         if session is None:
             return
+
+        await self._stop_demo_runtime()
 
         await self._publish_user(session.user_id, {
             "type": "session.updated",
@@ -421,10 +542,12 @@ class BoardManager:
         })
 
         try:
+            await self._stop_demo_runtime()
+
             if self.device_id:
                 await self.agent.reset(self.device_id)
         except Exception:
-            logger.exception("failed to reset board after session expiry")
+            logger.exception("failed to clean up board after session expiry")
 
         ended = await self.sessions.finish_active()
 

@@ -159,7 +159,7 @@ def create_api(board: BoardManager, proxy_client: httpx.AsyncClient, *, config: 
         user_id = _http_user(request)
 
         try:
-            backend = board.demo_backend_for(user_id, session_id)
+            backend = await board.demo_backend_for(user_id, session_id)
         except BoardError as exc:
             raise HTTPException(exc.status_code, str(exc))
 
