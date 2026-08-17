@@ -1,0 +1,17 @@
+.git
+.venv
+__pycache__
+.pytest_cache
+.mypy_cache
+.ruff_cache
+node_modules
+src/frontend/node_modules
+src/web_api/static/assets
+src/web_api/static/index.html
+dist
+build
+*.egg-info
+.env
+.env.*
+!.env.example
+.gitignore

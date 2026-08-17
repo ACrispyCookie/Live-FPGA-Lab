@@ -53,10 +53,11 @@ async def lifespan(app: FastAPI):
 def main() -> None:
     app = create_rpc_app(agent)
     app.router.lifespan_context = lifespan
+    socket_path = os.environ.get("FPGA_AGENT_SOCKET", "/tmp/fpga-agent.sock")
 
     uvicorn.run(
         app,
-        uds="/tmp/fpga-agent.sock",
+        uds=socket_path,
         access_log=False,
         log_config=None,
     )

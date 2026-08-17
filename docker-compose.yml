@@ -1,0 +1,78 @@
+services:
+  fpga-agent:
+    build:
+      context: .
+      dockerfile: docker/fpga-agent.Dockerfile
+    image: fpga-demo/fpga-agent:local
+    container_name: fpga-agent
+    restart: unless-stopped
+    init: true
+    privileged: true
+    environment:
+      FPGA_AGENT_SOCKET: ${FPGA_AGENT_SOCKET:/run/fpga-agent/fpga-agent.sock}
+      FPGA_AGENT_VIVADO_SETTINGS: ${FPGA_AGENT_VIVADO_SETTINGS:-/opt/Xilinx/2025.2/Vivado/settings64.sh}
+      FPGA_AGENT_XSDB: ${FPGA_AGENT_XSDB:-xsdb}
+      FPGA_AGENT_VIVADO: ${FPGA_AGENT_VIVADO:-vivado}
+      FPGA_DISCOVERY_INTERVAL_SECONDS: ${FPGA_DISCOVERY_INTERVAL_SECONDS:-10}
+      FPGA_TELEMETRY_INTERVAL_SECONDS: ${FPGA_TELEMETRY_INTERVAL_SECONDS:-2}
+      FPGA_OVER_TEMPERATURE_C: ${FPGA_OVER_TEMPERATURE_C:-75}
+      FPGA_OVER_TEMPERATURE_RECOVERY_C: ${FPGA_OVER_TEMPERATURE_RECOVERY_C:-60}
+      FPGA_AGENT_RESERVED_FOR_PROJECTS: ${FPGA_AGENT_RESERVED_FOR_PROJECTS:-false}
+      XILINXD_LICENSE_FILE: ${XILINXD_LICENSE_FILE:-}
+      LM_LICENSE_FILE: ${LM_LICENSE_FILE:-}
+    volumes:
+      - fpga-agent-run:/run/fpga-agent
+      # Mount the host Xilinx install read-only. Adjust HOST_XILINX_DIR in .env.
+      - ${HOST_XILINX_DIR:-/home/njason/Xilinx}:/opt/Xilinx:ro
+      # Give Vivado/XSDB access to USB/JTAG adapters. privileged=true is kept
+      # because Xilinx cable drivers often need broad USB/udev access.
+      - /dev/bus/usb:/dev/bus/usb
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /run/fpga-agent/fpga-agent.sock"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
+
+  web-api:
+    build:
+      context: .
+      dockerfile: docker/web-api.Dockerfile
+    image: fpga-demo/web-api:local
+    container_name: fpga-web-api
+    restart: unless-stopped
+    init: true
+    depends_on:
+      fpga-agent:
+        condition: service_healthy
+    ports:
+      - "${WEB_API_PUBLISHED_PORT:-9121}:9121"
+    environment:
+      WEB_API_HOST: 0.0.0.0
+      WEB_API_PORT: 9121
+      WEB_API_AGENT_SOCKET: ${FPGA_AGENT_SOCKET:/run/fpga-agent/fpga-agent.sock}
+      WEB_API_DEMO_DIR: /app/demos
+      WEB_API_COOKIE_SECURE: ${WEB_API_COOKIE_SECURE:-false}
+      WEB_API_COOKIE_SAMESITE: ${WEB_API_COOKIE_SAMESITE:-lax}
+      WEB_API_COOKIE_MAX_AGE_SECONDS: ${WEB_API_COOKIE_MAX_AGE_SECONDS:-43200}
+      WEB_API_SESSION_CONTENDED_SECONDS: ${WEB_API_SESSION_CONTENDED_SECONDS:-300}
+      WEB_API_SESSION_HANDOFF_SECONDS: ${WEB_API_SESSION_HANDOFF_SECONDS:-60}
+      DEMO_UART_PORT: ${DEMO_UART_PORT:-/dev/ttyUSB1}
+      DEMO_UART_BAUD: ${DEMO_UART_BAUD:-115200}
+      DEMO_HTTP_HOST: ${DEMO_HTTP_HOST:-127.0.0.1}
+      DEMO_HTTP_PORT: ${DEMO_HTTP_PORT:-}
+    volumes:
+      - fpga-agent-run:/run/fpga-agent
+      # Needed by the current gpgpu-nbody demo runtime when web-api launches it.
+      - ${DEMO_UART_PORT:-/dev/ttyUSB1}:${DEMO_UART_PORT:-/dev/ttyUSB1}
+    devices:
+      - ${DEMO_UART_PORT:-/dev/ttyUSB1}:${DEMO_UART_PORT:-/dev/ttyUSB1}
+    healthcheck:
+      test: ["CMD-SHELL", "python - <<'PY'\nfrom urllib.request import urlopen\nwith urlopen('http://127.0.0.1:9121/api/status', timeout=3) as r:\n    raise SystemExit(0 if r.status == 200 else 1)\nPY"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+volumes:
+  fpga-agent-run:
