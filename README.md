@@ -15,6 +15,9 @@ The current app is built around one physical FPGA board and one active user sess
 │   ├── web_api/               # FastAPI web app, queue/session manager, WS API
 │   └── frontend/              # Vite + React SPA source
 ├── tests/                     # Pytest tests for backend/session behavior
+├── docker/                    # Dockerfiles for web-api and fpga-agent images
+├── docker-compose.yml         # Two-container deployment for x86 hardware hosts
+├── .env.example               # Compose deployment settings template
 ├── pyproject.toml             # Python package, dependencies, CLI entry points
 └── uv.lock                    # Locked Python dependency graph
 ```
@@ -59,7 +62,8 @@ FPGA board + Xilinx tooling
 
 - `src/fpga_agent/`
   - Runs beside the hardware.
-  - Exposes a FastAPI RPC server on `/tmp/fpga-agent.sock`.
+  - Exposes a FastAPI RPC server on a Unix socket, `/tmp/fpga-agent.sock` by default.
+  - In Docker, set `FPGA_AGENT_SOCKET=/run/fpga-agent/fpga-agent.sock` so the socket can be shared with `web-api` through a named volume.
   - Discovers FPGA devices, tracks board state, streams board updates, programs PL/PS, resets the board, and latches faults.
 
 - `src/web_api/`
@@ -313,7 +317,112 @@ Check that the active session has an `active_expires_at` in `queue.updated` once
 
 If the board is `fault`, `offline`, or has a fault list, the frontend intentionally displays `Fault detected` in the ETA card instead of a countdown.
 
-## Packaging
+## Docker packaging and x86 deployment
+
+The repository includes a two-container Docker deployment for an x86 machine that has the FPGA/JTAG/UART hardware and Xilinx tools installed.
+
+```text
+fpga-agent container
+  ├─ runs XSDB/Vivado sessions
+  ├─ accesses USB/JTAG adapters
+  └─ publishes /run/fpga-agent/fpga-agent.sock through a named volume
+
+web-api container
+  ├─ serves the built React dashboard and FastAPI API on port 9121
+  ├─ connects to fpga-agent through the shared Unix socket
+  ├─ loads demos from /app/demos
+  └─ launches the current gpgpu-nbody demo runtime when a session becomes active
+```
+
+### Files
+
+```text
+docker/fpga-agent.Dockerfile   hardware-agent image
+docker/web-api.Dockerfile      web/API/frontend image
+docker-compose.yml             full local deployment
+.env.example                   deployment settings template
+.dockerignore                  small build context and no secrets
+```
+
+The `web-api` Dockerfile builds the React frontend first, then copies the generated `src/web_api/static/` files into the runtime image.
+
+### Prepare the deployment host
+
+On the x86 host:
+
+1. Install Docker Engine and Docker Compose.
+2. Install/mount Xilinx/Vivado so this file exists inside the `fpga-agent` container:
+
+   ```text
+   /opt/Xilinx/2025.2/Vivado/settings64.sh
+   ```
+
+   The Compose file does this by mounting the host path from `HOST_XILINX_DIR` to `/opt/Xilinx` read-only.
+3. Plug in the FPGA JTAG/USB cable and the demo UART device.
+4. Confirm the UART device path, usually:
+
+   ```text
+   /dev/ttyUSB0
+   ```
+
+### Configure Compose
+
+Create a local `.env` from the template:
+
+```bash
+cp .env.example .env
+```
+
+Edit at least these values:
+
+```env
+HOST_XILINX_DIR=/home/njason/Xilinx
+FPGA_AGENT_VIVADO_SETTINGS=/opt/Xilinx/2025.2/Vivado/settings64.sh
+HOST_DEMO_UART=/dev/ttyUSB1
+WEB_API_PUBLISHED_PORT=9121
+```
+
+If Vivado needs a license server or license file, set one of:
+
+```env
+XILINXD_LICENSE_FILE=
+LM_LICENSE_FILE=
+```
+
+### Build and start
+
+```bash
+docker compose build
+docker compose up -d
+```
+
+Check status and logs:
+
+```bash
+docker compose ps
+docker compose logs -f fpga-agent
+docker compose logs -f web-api
+```
+
+Verify the web API:
+
+```bash
+curl -i http://127.0.0.1:9121/api/status
+curl -i http://127.0.0.1:9121/
+curl -i http://127.0.0.1:9121/debug
+```
+
+### Updating a deployment
+
+```bash
+git pull
+cp .env.example .env   # only for first install; do not overwrite a tuned .env
+docker compose build
+docker compose up -d
+docker compose logs -f --tail=100
+```
+
+## Python package build
 
 Build the Python package with:
 
