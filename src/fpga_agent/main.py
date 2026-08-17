@@ -30,7 +30,7 @@ def _env_float(name: str, default: float) -> float:
         return float(raw)
     except ValueError as exc:
         raise ValueError(f"{name} must be a float") from exc
-    
+
 agent = Agent(
     AgentConfig(
         discovery_interval_seconds=_env_float("FPGA_DISCOVERY_INTERVAL_SECONDS", 10.0),

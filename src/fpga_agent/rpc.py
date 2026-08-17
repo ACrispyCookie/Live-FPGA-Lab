@@ -28,6 +28,10 @@ class ClearFaultRequest(BaseModel):
     fault_type: FaultType
 
 
+class ReservedForProjectsRequest(BaseModel):
+    reserved_for_projects: bool
+
+
 def create_rpc_app(agent: Agent) -> FastAPI:
     app = FastAPI(title="FPGA Agent RPC", docs_url=None, redoc_url=None)
 
@@ -131,5 +135,15 @@ def create_rpc_app(agent: Agent) -> FastAPI:
             raise HTTPException(404, "Unknown FPGA device")
         except RuntimeError as exc:
             raise HTTPException(409, str(exc))
+
+    @app.post("/devices/{device_id}/reserved-for-projects", response_model=FPGAState)
+    async def set_reserved_for_projects(device_id: str, request: ReservedForProjectsRequest):
+        try:
+            return agent.set_reserved_for_projects(
+                device_id,
+                request.reserved_for_projects,
+            )
+        except KeyError:
+            raise HTTPException(404, "Unknown FPGA device")
 
     return app

@@ -280,6 +280,24 @@ class Agent:
         self._publish_state(device)
         return device
 
+    def set_reserved_for_projects(
+        self,
+        device_id: str,
+        reserved_for_projects: bool,
+    ) -> FPGAState:
+        device = get_fpga(device_id)
+        device = update_fpga(
+            device,
+            reserved_for_projects=reserved_for_projects,
+        )
+        self._publish_state(device)
+        logger.warning(
+            "[bold red]◇ reservation[/] device=%s reserved_for_projects=%s",
+            device_id,
+            reserved_for_projects,
+        )
+        return device
+
     async def _discovery_loop(self) -> None:
         try:
             while self._running:

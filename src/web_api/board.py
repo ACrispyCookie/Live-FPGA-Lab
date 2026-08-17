@@ -304,6 +304,9 @@ class BoardManager:
         if state.status == FPGAStatus.FAULT:
             await self._end_for_board_problem(SessionEndReason.FPGA_FAULT)
             return
+        if state.status == FPGAStatus.RESERVED_FOR_PROJECTS:
+            await self._end_for_board_problem(SessionEndReason.RESERVED)
+            return
         if state.status == FPGAStatus.OFFLINE:
             await self._end_for_board_problem(SessionEndReason.BOARD_OFFLINE)
             return
@@ -480,6 +483,12 @@ class BoardManager:
             return
 
         await self._stop_demo_runtime()
+        if reason == SessionEndReason.RESERVED:
+            try:
+                if self.device_id:
+                    await self.agent.reset(self.device_id)
+            except Exception:
+                logger.exception("failed to clean up board after session expiry")
 
         await self._publish_user(session.user_id, {
             "type": "session.updated",
@@ -489,6 +498,8 @@ class BoardManager:
         message = (
             "FPGA fault detected. Your session has ended."
             if reason == SessionEndReason.FPGA_FAULT
+            else "FPGA reserved for owner projects. Your session has ended."
+            if reason == SessionEndReason.RESERVED
             else "FPGA became unavailable. Your session has ended."
         )
 
@@ -506,8 +517,9 @@ class BoardManager:
             })
         await self._publish_queue_updates()
 
-        # Do not reset here. The FPGA agent owns hardware/fault recovery.
+        # Do not reset here except reserved. The FPGA agent owns hardware/fault recovery.
         # The queue resumes when the agent eventually reports IDLE.
+
 
     def _schedule_expiry(self, session: DemoSession) -> None:
         self._cancel_expiry()

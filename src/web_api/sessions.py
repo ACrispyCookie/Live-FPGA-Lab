@@ -26,6 +26,7 @@ class SessionEndReason(str, Enum):
     FPGA_FAULT = "fpga_fault"
     BOARD_OFFLINE = "board_offline"
     PROGRAMMING_FAILED = "programming_failed"
+    RESERVED = "board_reserved"
 
 
 class DemoSession(BaseModel):
