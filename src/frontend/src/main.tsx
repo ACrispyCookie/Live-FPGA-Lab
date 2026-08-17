@@ -6,6 +6,7 @@ type Board = {
   device_id?: string | null;
   device_name?: string | null;
   status?: string | null;
+  reserved_for_projects?: boolean | null;
   bitstream_id?: string | null;
   telemetry?: { temperature_c?: number | null } | null;
   faults?: Array<{ type?: string; message?: string }>;
@@ -134,15 +135,16 @@ function App() {
   const boardDemo = demos.find((demo) => demo.id === visibleBoardSession?.demo_id);
   const faults = board?.faults || [];
   const boardStatus = board?.status || 'unknown';
+  const boardReserved = Boolean(board?.reserved_for_projects) || boardStatus === 'reserved_for_projects';
   const hasBoardFault = boardStatus === 'fault' || boardStatus === 'offline' || faults.length > 0;
-  const healthState = boardStatus === 'fault' || faults.length ? 'bad' : boardStatus === 'offline' ? 'warn' : 'ok';
-  const boardDotClass = boardStatus === 'running' ? 'ok' : boardStatus === 'fault' || boardStatus === 'offline' ? 'bad' : 'warn';
+  const healthState = boardReserved || boardStatus === 'fault' || faults.length ? 'bad' : boardStatus === 'offline' ? 'warn' : 'ok';
+  const boardDotClass = boardStatus === 'running' ? 'ok' : boardReserved || boardStatus === 'fault' || boardStatus === 'offline' ? 'bad' : 'warn';
   const sessionHelp = sessionCopy(liveSession, activeTimeLeft, queueEta);
   const isActiveUser = liveSession?.status === 'active';
-  const queueDisplayEta = !hasBoardFault && !isActiveUser && queue.position ? queueEta : null;
+  const queueDisplayEta = !boardReserved && !hasBoardFault && !isActiveUser && queue.position ? queueEta : null;
   const queuePlaceLabel = !isActiveUser && queue.position ? String(queue.position) : 'No place';
-  const queueEtaLabel = hasBoardFault ? 'Fault detected' : queueDisplayEta == null ? 'No ETA available' : duration(queueDisplayEta);
-  const queueBarPct = !hasBoardFault && !isActiveUser && queue.position && queueDisplayEta != null
+  const queueEtaLabel = boardReserved ? 'Reserved' : hasBoardFault ? 'Fault detected' : queueDisplayEta == null ? 'No ETA available' : duration(queueDisplayEta);
+  const queueBarPct = !boardReserved && !hasBoardFault && !isActiveUser && queue.position && queueDisplayEta != null
     ? Math.max(0, Math.min(100, (queueDisplayEta / Math.max(1, queue.position * CONTENDED_SECONDS)) * 100))
     : 0;
 
@@ -167,7 +169,7 @@ function App() {
           <div className="board-grid">
             <InfoRow tone={boardDotClass} label={titleCase(boardStatus)} value={formatTemp(board)} />
             <InfoRow tone={visibleBoardSession ? 'ok' : 'neutral'} label={board?.device_name || board?.device_id || 'Board'} value={runningDemoLabel(visibleBoardSession, boardDemo)} />
-            <InfoRow tone={healthState} label="Health" value={healthSummary(healthState, faults)} />
+            <InfoRow tone={healthState} label="Health" value={healthSummary(healthState, faults, boardReserved)} />
           </div>
         </Section>
 
@@ -179,8 +181,8 @@ function App() {
                   <strong>{demo.name}</strong>
                   {demo.description && <span>{demo.description}</span>}
                 </div>
-                <button disabled={Boolean(liveSession)} onClick={() => send('session.create', { demo_id: demo.id })}>
-                  {liveSession ? 'Busy' : 'Start'}
+                <button disabled={Boolean(liveSession) || boardReserved} onClick={() => send('session.create', { demo_id: demo.id })}>
+                  {boardReserved ? 'Reserved' : liveSession ? 'Busy' : 'Start'}
                 </button>
               </article>
             )) : <div className="empty">No demos are currently available.</div>}
@@ -324,7 +326,8 @@ function runningDemoLabel(session: NonNullable<Session> | null, demo?: Demo) {
   return 'No demo running';
 }
 
-function healthSummary(tone: string, faults: Array<{ type?: string; message?: string }>) {
+function healthSummary(tone: string, faults: Array<{ type?: string; message?: string }>, reserved = false) {
+  if (reserved) return 'Reserved for owner projects';
   if (tone === 'ok') return 'No faults reported';
   if (!faults.length) return 'Board unavailable';
   return faults.map((fault) => titleCase(fault.message || fault.type || 'Fault')).join(', ');

@@ -126,6 +126,13 @@ class BoardManager:
                     self._subscribers.pop(user_id, None)
 
     async def create_session(self, user_id: str, demo_id: str) -> DemoSession:
+        if self.fpga_state and getattr(self.fpga_state, "reserved_for_projects", False):
+            raise BoardError(
+                "reserved_for_projects",
+                "The FPGA is currently reserved for owner projects.",
+                status_code=503,
+            )
+
         if demo_id not in self.demos:
             raise BoardError("unknown_demo", "Unknown demo.")
         active_before = self.sessions.active
@@ -307,7 +314,11 @@ class BoardManager:
         if not self._running:
             return
 
-        if not self.fpga_state or self.fpga_state.status != FPGAStatus.IDLE:
+        if (
+            not self.fpga_state
+            or self.fpga_state.status != FPGAStatus.IDLE
+            or getattr(self.fpga_state, "reserved_for_projects", False)
+        ):
             return
         try:
             session = await self.sessions.begin_next()
@@ -607,6 +618,7 @@ class BoardManager:
             "device_id": self.device_id,
             "device_name": self.fpga_state.target_ctx.fpga_name,
             "status": self.fpga_state.status.value,
+            "reserved_for_projects": self.fpga_state.reserved_for_projects,
             "bitstream_id": self.fpga_state.bitstream_id,
             "telemetry": self.fpga_state.telemetry.model_dump(mode="json"),
             "faults": [

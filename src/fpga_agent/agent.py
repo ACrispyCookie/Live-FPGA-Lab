@@ -18,6 +18,7 @@ class AgentConfig:
 
     over_temperature_c: float = 75.0
     over_temperature_recovery_c: float = 60.0
+    reserved_for_projects: bool = False
 
 class Agent:
     def __init__(
@@ -39,11 +40,12 @@ class Agent:
             return
         logger.info("[bold blue]╭─ FPGA agent boot[/]")
         logger.info(
-            "[blue]│ config[/] discovery=%.1fs telemetry=%.1fs thermal_limit=%.1f°C recovery=%.1f°C",
+            "[blue]│ config[/] discovery=%.1fs telemetry=%.1fs thermal_limit=%.1f°C recovery=%.1f°C reserved_for_projects=%s",
             self.config.discovery_interval_seconds,
             self.config.telemetry_interval_seconds,
             self.config.over_temperature_c,
             self.config.over_temperature_recovery_c,
+            self.config.reserved_for_projects,
         )
 
         logger.info("[blue]│[/] starting persistent [bold]XSDB[/] action session")
@@ -81,7 +83,9 @@ class Agent:
             logger.error("[bold red]╰─ boot failed[/] no FPGA devices discovered")
             await asyncio.to_thread(self._actions.stop)
             return
-        devices = register_jtag_discovery(targets)
+        devices = self._apply_reserved_for_projects(
+            register_jtag_discovery(targets)
+        )
         for device in devices:
             logger.info(
                 "[green]│ ✓[/] device=%s fpga=%s processor=%s dap=%s",
@@ -290,7 +294,9 @@ class Agent:
                     continue
 
                 targets = result.data or []
-                new = register_jtag_discovery(targets)
+                new = self._apply_reserved_for_projects(
+                    register_jtag_discovery(targets)
+                )
                 if new:
                     logger.info("[green]◇ discovery[/] new_devices=%d", len(new))
         except asyncio.CancelledError:
@@ -367,6 +373,14 @@ class Agent:
                 except asyncio.QueueEmpty:
                     pass
             queue.put_nowait(device)
+
+    def _apply_reserved_for_projects(self, devices: list[FPGAState]) -> list[FPGAState]:
+        if not self.config.reserved_for_projects:
+            return devices
+        return [
+            update_fpga(device, reserved_for_projects=True)
+            for device in devices
+        ]
 
     async def _evaluate_safety(
         self,

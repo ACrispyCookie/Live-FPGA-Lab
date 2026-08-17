@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 import logging
+import os
 
 from rich.logging import RichHandler
 import uvicorn
@@ -21,15 +22,24 @@ logging.getLogger("uvicorn.error").disabled = True
 logging.getLogger("uvicorn.access").disabled = True
 
 
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        return float(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a float") from exc
+    
 agent = Agent(
     AgentConfig(
-        discovery_interval_seconds=10.0,
-        telemetry_interval_seconds=1.0,
-        over_temperature_c=75.0,
-        over_temperature_recovery_c=60.0,
+        discovery_interval_seconds=_env_float("FPGA_DISCOVERY_INTERVAL_SECONDS", 10.0),
+        telemetry_interval_seconds=_env_float("FPGA_TELEMETRY_INTERVAL_SECONDS", 2.0),
+        over_temperature_c=_env_float("FPGA_OVER_TEMPERATURE_C", 75.0),
+        over_temperature_recovery_c=_env_float("FPGA_OVER_TEMPERATURE_RECOVERY_C", 60.0),
+        reserved_for_projects=os.getenv("FPGA_AGENT_RESERVED_FOR_PROJECTS", "").lower() in {"1", "true", "yes", "on"},
     )
 )
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

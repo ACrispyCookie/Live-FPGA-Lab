@@ -21,6 +21,7 @@ class FPGAStatus(str, Enum):
     IDLE = "idle"
     RUNNING = "running"
     FAULT = "fault"
+    RESERVED_FOR_PROJECTS = "reserved_for_projects"
 
 
 class FPGATelemetry(BaseModel):
@@ -81,6 +82,7 @@ class FPGAState(BaseModel):
 
     target_ctx: JTAGTargetContext
     bitstream_id: str | None = None
+    reserved_for_projects: bool = False
     telemetry: FPGATelemetry = Field(default_factory=FPGATelemetry)
     faults: list[FPGAFault] = Field(default_factory=list)
     updated_at: datetime = Field(default_factory=utc_now)
@@ -93,6 +95,8 @@ class FPGAState(BaseModel):
             for fault in self.faults
         ): 
             return FPGAStatus.OFFLINE
+        elif self.reserved_for_projects:
+            return FPGAStatus.RESERVED_FOR_PROJECTS
         elif not self.can_program():
             return FPGAStatus.FAULT
         elif self.bitstream_id:
@@ -106,6 +110,9 @@ class FPGAState(BaseModel):
 
 
     def can_program(self) -> bool:
+        if self.reserved_for_projects:
+            return False
+
         return not any(
             FAULT_POLICIES[fault.type].blocks_programming
             for fault in self.faults
