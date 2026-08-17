@@ -26,7 +26,6 @@ Important generated/runtime paths:
 
 ```text
 src/web_api/static/            # Built frontend output served by FastAPI
-src/web_api/static/debug.html  # Older debug console, kept at /debug
 src/frontend/node_modules/     # Local npm dependencies, ignored by git
 ```
 
@@ -36,7 +35,6 @@ src/frontend/node_modules/     # Local npm dependencies, ignored by git
 Browser
   │
   │  /                         React dashboard, built into src/web_api/static/
-  │  /debug                    simple debug console
   │  /api/ws                   WebSocket state + commands
   │  /api/sessions/.../demo    proxy to active demo backend
   ▼
@@ -69,7 +67,7 @@ FPGA board + Xilinx tooling
 - `src/web_api/`
   - Runs the user-facing FastAPI app on port `9121` by default.
   - Connects to the FPGA agent via the Unix socket.
-  - Serves `/`, `/debug`, `/static/*`, `/api/status`, `/api/ws`, demo proxy routes, and artifact routes.
+  - Serves `/`, `/static/*`, `/api/status`, `/api/ws`, demo proxy routes, and artifact routes.
   - Manages anonymous users with the `fpga_user` cookie.
 
 - `src/web_api/sessions.py`
@@ -154,7 +152,6 @@ Useful routes:
 
 ```text
 /              main React dashboard
-/debug         older debug console
 /api/status    quick API/board availability check
 /api/ws        WebSocket endpoint used by the frontend
 ```
@@ -279,16 +276,6 @@ Rebuild the frontend:
 npm run build --prefix src/frontend
 ```
 
-### `/debug` disappeared after building frontend
-
-Check `src/frontend/vite.config.ts`. It should contain:
-
-```ts
-emptyOutDir: false
-```
-
-That prevents Vite from deleting `src/web_api/static/debug.html`.
-
 ### WebSocket shows disconnected/skeleton page
 
 Check that the web API is still running and that the browser can reach:
@@ -409,7 +396,6 @@ Verify the web API:
 ```bash
 curl -i http://127.0.0.1:9121/api/status
 curl -i http://127.0.0.1:9121/
-curl -i http://127.0.0.1:9121/debug
 ```
 
 ### Updating a deployment

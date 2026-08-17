@@ -7,7 +7,6 @@ COPY src/frontend/package*.json src/frontend/
 RUN npm install --prefix src/frontend
 
 COPY src/frontend src/frontend
-COPY src/web_api/static/debug.html src/web_api/static/debug.html
 RUN npm run build --prefix src/frontend
 
 
