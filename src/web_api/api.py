@@ -8,7 +8,8 @@ from pathlib import Path
 import secrets
 import httpx
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, StreamingResponse
+from starlette.background import BackgroundTask
 
 from .board import BoardError, BoardManager
 from .config import WebApiConfig
@@ -170,12 +171,16 @@ def create_api(board: BoardManager, proxy_client: httpx.AsyncClient, *, config: 
             if key.lower() not in HOP_BY_HOP_HEADERS | {"host", "cookie"}
         }
 
-        response = await proxy_client.request(
+        proxy_request = proxy_client.build_request(
             request.method,
             url,
             params=request.query_params,
             headers=headers,
             content=await request.body(),
+        )
+        response = await proxy_client.send(
+            proxy_request,
+            stream=True,
             follow_redirects=False,
         )
 
@@ -185,10 +190,11 @@ def create_api(board: BoardManager, proxy_client: httpx.AsyncClient, *, config: 
             if key.lower() not in HOP_BY_HOP_HEADERS | {"content-length"}
         }
 
-        return Response(
-            content=response.content,
+        return StreamingResponse(
+            response.aiter_raw(),
             status_code=response.status_code,
             headers=response_headers,
+            background=BackgroundTask(response.aclose),
         )
 
     return router

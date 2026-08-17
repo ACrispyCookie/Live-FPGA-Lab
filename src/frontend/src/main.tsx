@@ -98,7 +98,7 @@ function App() {
       ws.addEventListener('close', () => {
         if (closed || wsRef.current !== ws) return;
         attemptsRef.current += 1;
-        const delay = Math.min(10000, 350 * 2 ** Math.min(attemptsRef.current, 5));
+        const delay = Math.min(2000, 200 * 2 ** Math.max(0, attemptsRef.current - 1));
         setWsState('reconnecting');
         retryRef.current = window.setTimeout(connect, delay);
       });
