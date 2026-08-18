@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
 from .agent import Agent
-from .fpga import FPGAState, FaultType, ProgrammingPurpose
+from .fpga import FPGAState, FaultType, FPGAMode
 from fastapi.responses import StreamingResponse
 
 logger = logging.getLogger("rpc")
@@ -15,7 +15,7 @@ logger = logging.getLogger("rpc")
 
 class ProgramPLRequest(BaseModel):
     bitstream: str
-    purpose: ProgrammingPurpose = ProgrammingPurpose.DEMO
+    mode: FPGAMode = FPGAMode.DEMO
 
 
 class ProgramPSRequest(BaseModel):
@@ -23,17 +23,16 @@ class ProgramPSRequest(BaseModel):
     elf: str
     reset_processor: bool = True
     continue_after_download: bool = True
-    purpose: ProgrammingPurpose = ProgrammingPurpose.DEMO
+    mode: FPGAMode = FPGAMode.DEMO
 
 class ResetRequest(BaseModel):
-    purpose: ProgrammingPurpose = ProgrammingPurpose.DEMO
+    mode: FPGAMode = FPGAMode.DEMO
 
 class ClearFaultRequest(BaseModel):
     fault_type: FaultType
 
-
-class ReservedForProjectsRequest(BaseModel):
-    reserved_for_projects: bool
+class SetModeRequest(BaseModel):
+    mode: FPGAMode = FPGAMode.DEMO
 
 
 def create_rpc_app(agent: Agent) -> FastAPI:
@@ -101,7 +100,7 @@ def create_rpc_app(agent: Agent) -> FastAPI:
     @app.post("/devices/{device_id}/pl/program", response_model=FPGAState)
     async def program_pl(device_id: str, request: ProgramPLRequest):
         try:
-            return await agent.program_pl(device_id, Path(request.bitstream), purpose=request.purpose)
+            return await agent.program_pl(device_id, Path(request.bitstream), mode=request.mode)
         except KeyError:
             raise HTTPException(404, "Unknown FPGA device")
         except RuntimeError as exc:
@@ -116,7 +115,7 @@ def create_rpc_app(agent: Agent) -> FastAPI:
                 elf=Path(request.elf),
                 reset_processor=request.reset_processor,
                 continue_after_download=request.continue_after_download,
-                purpose=request.purpose,
+                mode=request.mode,
             )
         except KeyError:
             raise HTTPException(404, "Unknown FPGA device")
@@ -128,10 +127,10 @@ def create_rpc_app(agent: Agent) -> FastAPI:
         device_id: str,
         request: ResetRequest | None = None,
     ):
-        purpose = request.purpose if request else ProgrammingPurpose.DEMO
+        mode = request.mode if request else FPGAMode.DEMO
 
         try:
-            return await agent.reset_board(device_id, purpose=purpose)
+            return await agent.reset_board(device_id, mode=mode)
         except KeyError:
             raise HTTPException(404, "Unknown FPGA device")
         except RuntimeError as exc:
@@ -146,12 +145,12 @@ def create_rpc_app(agent: Agent) -> FastAPI:
         except RuntimeError as exc:
             raise HTTPException(409, str(exc))
 
-    @app.post("/devices/{device_id}/reserved-for-projects", response_model=FPGAState)
-    async def set_reserved_for_projects(device_id: str, request: ReservedForProjectsRequest):
+    @app.post("/devices/{device_id}/mode", response_model=FPGAState)
+    async def set_mode(device_id: str, request: SetModeRequest):
         try:
-            return agent.set_reserved_for_projects(
+            return agent.set_mode(
                 device_id,
-                request.reserved_for_projects,
+                request.mode,
             )
         except KeyError:
             raise HTTPException(404, "Unknown FPGA device")

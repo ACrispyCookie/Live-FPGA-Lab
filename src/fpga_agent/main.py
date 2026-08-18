@@ -6,6 +6,7 @@ from rich.logging import RichHandler
 import uvicorn
 from fastapi import FastAPI
 
+from .fpga import FPGAMode
 from .agent import Agent, AgentConfig
 from .rpc import create_rpc_app
 
@@ -37,7 +38,7 @@ agent = Agent(
         telemetry_interval_seconds=_env_float("FPGA_TELEMETRY_INTERVAL_SECONDS", 2.0),
         over_temperature_c=_env_float("FPGA_OVER_TEMPERATURE_C", 75.0),
         over_temperature_recovery_c=_env_float("FPGA_OVER_TEMPERATURE_RECOVERY_C", 60.0),
-        reserved_for_projects=os.getenv("FPGA_AGENT_RESERVED_FOR_PROJECTS", "").lower() in {"1", "true", "yes", "on"},
+        mode=FPGAMode[os.getenv("FPGA_AGENT_MODE", "DEMO").upper()],
     )
 )
 

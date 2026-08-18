@@ -7,7 +7,7 @@ from contextlib import suppress
 from datetime import UTC, datetime
 from typing import Any
 
-from fpga_agent.fpga import FPGAState, FPGAStatus
+from fpga_agent.fpga import FPGAState, FPGAStatus, FPGAMode
 
 from .agent_client import AgentClient
 from .config import WebApiConfig
@@ -126,7 +126,7 @@ class BoardManager:
                     self._subscribers.pop(user_id, None)
 
     async def create_session(self, user_id: str, demo_id: str) -> DemoSession:
-        if self.fpga_state and getattr(self.fpga_state, "reserved_for_projects", False):
+        if self.fpga_state and getattr(self.fpga_state, "mode", FPGAMode.DEMO) == FPGAMode.PROJECT:
             raise BoardError(
                 "reserved_for_projects",
                 "The FPGA is currently reserved for owner projects.",
@@ -309,7 +309,7 @@ class BoardManager:
         if state.status == FPGAStatus.FAULT:
             await self._end_for_board_problem(SessionEndReason.FPGA_FAULT)
             return
-        if state.status == FPGAStatus.RESERVED_FOR_PROJECTS:
+        if state.mode == FPGAMode.PROJECT:
             await self._end_for_board_problem(SessionEndReason.RESERVED)
             return
         if state.status == FPGAStatus.OFFLINE:
@@ -325,7 +325,7 @@ class BoardManager:
         if (
             not self.fpga_state
             or self.fpga_state.status != FPGAStatus.IDLE
-            or getattr(self.fpga_state, "reserved_for_projects", False)
+            or getattr(self.fpga_state, "mode", FPGAMode.DEMO) == FPGAMode.PROJECT
         ):
             return
         try:
@@ -635,7 +635,7 @@ class BoardManager:
             "device_id": self.device_id,
             "device_name": self.fpga_state.target_ctx.fpga_name,
             "status": self.fpga_state.status.value,
-            "reserved_for_projects": self.fpga_state.reserved_for_projects,
+            "mode": self.fpga_state.mode,
             "bitstream_id": self.fpga_state.bitstream_id,
             "telemetry": self.fpga_state.telemetry.model_dump(mode="json"),
             "faults": [

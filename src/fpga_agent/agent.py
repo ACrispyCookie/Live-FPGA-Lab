@@ -7,7 +7,7 @@ from pathlib import Path
 from datetime import datetime
 
 from .actions import BoardActions, ActionResult
-from .fpga import register_jtag_discovery, list_fpgas, update_fpga, add_fault, clear_fault, get_fpga, FPGAState, FPGATelemetry, FaultType, ProgrammingPurpose
+from .fpga import register_jtag_discovery, list_fpgas, update_fpga, add_fault, clear_fault, get_fpga, FPGAState, FPGATelemetry, FaultType, FPGAMode
 
 logger = logging.getLogger('agent')
 
@@ -18,7 +18,7 @@ class AgentConfig:
 
     over_temperature_c: float = 75.0
     over_temperature_recovery_c: float = 60.0
-    reserved_for_projects: bool = False
+    mode: FPGAMode = FPGAMode.DEMO
 
 class Agent:
     def __init__(
@@ -40,12 +40,12 @@ class Agent:
             return
         logger.info("[bold blue]╭─ FPGA agent boot[/]")
         logger.info(
-            "[blue]│ config[/] discovery=%.1fs telemetry=%.1fs thermal_limit=%.1f°C recovery=%.1f°C reserved_for_projects=%s",
+            "[blue]│ config[/] discovery=%.1fs telemetry=%.1fs thermal_limit=%.1f°C recovery=%.1f°C mode=%s",
             self.config.discovery_interval_seconds,
             self.config.telemetry_interval_seconds,
             self.config.over_temperature_c,
             self.config.over_temperature_recovery_c,
-            self.config.reserved_for_projects,
+            self.config.mode,
         )
 
         logger.info("[blue]│[/] starting persistent [bold]XSDB[/] action session")
@@ -165,33 +165,33 @@ class Agent:
         device_id: str,
         bitstream: str | Path,
         *,
-        purpose: ProgrammingPurpose = ProgrammingPurpose.DEMO,
+        mode: FPGAMode = FPGAMode.DEMO,
     ) -> FPGAState:
         device = get_fpga(device_id)
-        if not device.can_program(purpose):
-            raise RuntimeError(f"FPGA {device_id!r} cannot be programmed for {purpose.value} use")
+        if not device.can_program(mode):
+            raise RuntimeError(f"FPGA {device_id!r} cannot be programmed for {mode.value} use")
         lock = self._get_device_lock(device_id)
 
         async with lock:
             # Get current state again after acquiring the lock.
             device = get_fpga(device_id)
-            if not device.can_program(purpose):
-                raise RuntimeError(f"FPGA {device_id!r} cannot be programmed for {purpose.value} use")
-            logger.info("[blue]▶ pl.program[/] device=%s purpose=%s bitstream=%s", device_id, purpose.value, bitstream)
+            if not device.can_program(mode):
+                raise RuntimeError(f"FPGA {device_id!r} cannot be programmed for {mode.value} use")
+            logger.info("[blue]▶ pl.program[/] device=%s mode=%s bitstream=%s", device_id, mode.value, bitstream)
             result = await asyncio.to_thread(self._actions.program_pl, bitstream, device_state=device)
 
             device = get_fpga(device_id)
             if not result.ok:
                 device = add_fault(device, FaultType.PROGRAMMING_FAILED)
                 logger.error(
-                    "[bold red]✖ pl.program[/] device=%s purpose=%s error=%s detail=%s", device_id, purpose.value, result.error, result.stderr)
+                    "[bold red]✖ pl.program[/] device=%s mode=%s error=%s detail=%s", device_id, mode.value, result.error, result.stderr)
                 raise RuntimeError(result.stderr or "PL programming failed")
             bitstream_id = _sha256_file(Path(bitstream).expanduser().resolve())
             device = clear_fault(device, FaultType.PROGRAMMING_FAILED)
             device = clear_fault(device, FaultType.COMMUNICATION_LOST)
             device = update_fpga(device, bitstream_id=bitstream_id)
             self._publish_state(device)
-            logger.info("[green]✓ pl.program[/] device=%s purpose=%s bitstream=%s", device_id, purpose.value, bitstream_id[:12])
+            logger.info("[green]✓ pl.program[/] device=%s mode=%s bitstream=%s", device_id, mode.value, bitstream_id[:12])
         return device
 
 
@@ -203,18 +203,18 @@ class Agent:
         elf: str | Path,
         reset_processor: bool = True,
         continue_after_download: bool = True,
-        purpose: ProgrammingPurpose = ProgrammingPurpose.DEMO,
+        mode: FPGAMode = FPGAMode.DEMO,
     ) -> FPGAState:
         device = get_fpga(device_id)
-        if not device.can_program(purpose):
-            raise RuntimeError(f"FPGA {device_id!r} cannot be programmed for {purpose.value} use")
+        if not device.can_program(mode):
+            raise RuntimeError(f"FPGA {device_id!r} cannot be programmed for {mode.value} use")
         lock = self._get_device_lock(device_id)
         async with lock:
             # Get current state again after acquiring the lock.
             device = get_fpga(device_id)
-            if not device.can_program(purpose):
-                raise RuntimeError(f"FPGA {device_id!r} cannot be reset for {purpose.value} use")
-            logger.info("[blue]▶ ps.program[/] device=%s purpose=%s elf=%s", device_id, purpose.value, elf)
+            if not device.can_program(mode):
+                raise RuntimeError(f"FPGA {device_id!r} cannot be reset for {mode.value} use")
+            logger.info("[blue]▶ ps.program[/] device=%s mode=%s elf=%s", device_id, mode.value, elf)
             result = await asyncio.to_thread(
                 self._actions.program_ps,
                 device_state=device,
@@ -241,11 +241,11 @@ class Agent:
         self,
         device_id: str,
         *,
-        purpose: ProgrammingPurpose = ProgrammingPurpose.DEMO,
+        mode: FPGAMode = FPGAMode.DEMO,
     ) -> FPGAState:
         device = get_fpga(device_id)
-        if not device.can_program(purpose):
-            raise RuntimeError(f"FPGA {device_id!r} cannot be reset for {purpose.value} use")
+        if not device.can_program(mode):
+            raise RuntimeError(f"FPGA {device_id!r} cannot be reset for {mode.value} use")
         lock = self._get_device_lock(device_id)
 
         async with lock:
@@ -285,21 +285,21 @@ class Agent:
         self._publish_state(device)
         return device
 
-    def set_reserved_for_projects(
+    def set_mode(
         self,
         device_id: str,
-        reserved_for_projects: bool,
+        mode: FPGAMode,
     ) -> FPGAState:
         device = get_fpga(device_id)
         device = update_fpga(
             device,
-            reserved_for_projects=reserved_for_projects,
+            mode=mode,
         )
         self._publish_state(device)
         logger.warning(
-            "[bold red]◇ reservation[/] device=%s reserved_for_projects=%s",
+            "[bold red]◇ reservation[/] device=%s mode=%s",
             device_id,
-            reserved_for_projects,
+            mode,
         )
         return device
 
@@ -398,10 +398,10 @@ class Agent:
             queue.put_nowait(device)
 
     def _apply_reserved_for_projects(self, devices: list[FPGAState]) -> list[FPGAState]:
-        if not self.config.reserved_for_projects:
+        if self.config.mode == FPGAMode.DEMO:
             return devices
         return [
-            update_fpga(device, reserved_for_projects=True)
+            update_fpga(device, mode=FPGAMode.PROJECT)
             for device in devices
         ]
 

@@ -21,7 +21,6 @@ class FPGAStatus(str, Enum):
     IDLE = "idle"
     RUNNING = "running"
     FAULT = "fault"
-    RESERVED_FOR_PROJECTS = "reserved_for_projects"
 
 
 class FPGATelemetry(BaseModel):
@@ -66,7 +65,7 @@ class FPGAFault(BaseModel):
     bitstream_id: str | None = None
     telemetry: FPGATelemetry | None = None
 
-class ProgrammingPurpose(str, Enum):
+class FPGAMode(str, Enum):
     DEMO = "demo"
     PROJECT = "project"
 
@@ -86,7 +85,7 @@ class FPGAState(BaseModel):
 
     target_ctx: JTAGTargetContext
     bitstream_id: str | None = None
-    reserved_for_projects: bool = False
+    mode: FPGAMode = FPGAMode.DEMO
     telemetry: FPGATelemetry = Field(default_factory=FPGATelemetry)
     faults: list[FPGAFault] = Field(default_factory=list)
     updated_at: datetime = Field(default_factory=utc_now)
@@ -106,9 +105,6 @@ class FPGAState(BaseModel):
         ):
             return FPGAStatus.FAULT
 
-        if self.reserved_for_projects:
-            return FPGAStatus.RESERVED_FOR_PROJECTS
-
         if self.bitstream_id:
             return FPGAStatus.RUNNING
 
@@ -120,17 +116,17 @@ class FPGAState(BaseModel):
         return self.target_ctx.cable_serial
 
 
-    def can_program(self, purpose: ProgrammingPurpose = ProgrammingPurpose.DEMO) -> bool:
+    def can_program(self, mode: FPGAMode = FPGAMode.DEMO) -> bool:
         if any(
             FAULT_POLICIES[fault.type].blocks_programming
             for fault in self.faults
         ):
             return False
 
-        if purpose == ProgrammingPurpose.PROJECT:
-            return self.reserved_for_projects
+        if mode == FPGAMode.PROJECT:
+            return self.mode == FPGAMode.PROJECT
 
-        return not self.reserved_for_projects
+        return self.mode == FPGAMode.DEMO
 
 
 _FPGA_STATES: dict[str, FPGAState] = {}
