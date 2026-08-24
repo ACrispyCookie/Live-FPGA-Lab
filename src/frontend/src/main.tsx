@@ -156,6 +156,7 @@ function App() {
   const faults = board?.faults || [];
   const boardStatus = board?.status || 'unknown';
   const boardReserved = Boolean(board?.mode === 'project');
+  const boardStatusLabel = boardReserved ? 'Reserved for projects' : titleCase(boardStatus);
   const hasBoardFault = boardStatus === 'fault' || boardStatus === 'offline' || faults.length > 0;
   const healthState = boardReserved || boardStatus === 'fault' || faults.length ? 'bad' : boardStatus === 'offline' ? 'warn' : 'ok';
   const boardDotClass = boardStatus === 'running' ? 'ok' : boardReserved || boardStatus === 'fault' || boardStatus === 'offline' ? 'bad' : 'warn';
@@ -189,7 +190,7 @@ function App() {
       <div className="hero-grid">
         <Section title="Board" className="board-section">
           <div className="board-grid">
-            <InfoRow tone={boardDotClass} label={titleCase(boardStatus)} value={formatTemp(board)} />
+            <InfoRow tone={boardDotClass} label={boardStatusLabel} value={formatTemp(board)} />
             <InfoRow tone={visibleBoardSession ? 'ok' : 'neutral'} label={board?.device_name || board?.device_id || 'Board'} value={runningDemoLabel(visibleBoardSession, boardDemo)} />
             <InfoRow tone={healthState} label="Health" value={healthSummary(healthState, faults, boardReserved)} />
           </div>

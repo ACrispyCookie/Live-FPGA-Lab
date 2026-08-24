@@ -23,6 +23,7 @@ UART_PORT = os.environ.get("DEMO_UART_PORT", "/dev/ttyUSB1")
 BAUD = int(os.environ.get("DEMO_UART_BAUD", "115200"))
 HTTP_HOST = os.environ.get("DEMO_HTTP_HOST", "127.0.0.1")
 HTTP_PORT = os.environ.get("DEMO_HTTP_PORT")
+DATASET = os.environ.get("DEMO_DATASET", "rings")
 
 
 def start_session(*, demo, session_id: str) -> dict[str, Any]:
@@ -41,6 +42,7 @@ def start_session(*, demo, session_id: str) -> dict[str, Any]:
         ),
         "--http-host", HTTP_HOST,
         "--http-port", str(port),
+        "--dataset", DATASET,
         "--no-browser",
     ]
 
