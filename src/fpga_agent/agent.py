@@ -7,7 +7,7 @@ from pathlib import Path
 from datetime import datetime
 
 from .actions import BoardActions, ActionResult
-from .fpga import register_jtag_discovery, list_fpgas, update_fpga, add_fault, clear_fault, get_fpga, FPGAState, FPGATelemetry, FaultType, FPGAMode
+from .fpga import register_jtag_discovery, list_fpgas, update_fpga, add_fault, clear_fault, get_fpga, FPGAState, FPGATelemetry, FaultType, FPGAMode, JTAGTargetContext
 
 logger = logging.getLogger('agent')
 
@@ -15,6 +15,8 @@ logger = logging.getLogger('agent')
 class AgentConfig:
     discovery_interval_seconds: float = 5.0
     telemetry_interval_seconds: float = 1.0
+    discovery_timeout_seconds: float = 5.0
+    telemetry_timeout_seconds: float = 5.0
 
     over_temperature_c: float = 75.0
     over_temperature_recovery_c: float = 60.0
@@ -308,23 +310,58 @@ class Agent:
             while self._running:
                 await asyncio.sleep(self.config.discovery_interval_seconds)
 
-                result = await asyncio.to_thread(self._actions.discover_jtag_targets)
+                result = await asyncio.to_thread(
+                    self._actions.discover_jtag_targets,
+                    timeout_seconds=self.config.discovery_timeout_seconds,
+                )
                 if not self._running:
                     return
                 
                 if not result.ok:
                     logger.warning("[yellow]◇ discovery[/] failed: %s", result.stderr or result.error)
+                    await self._handle_discovery_failure(result)
                     continue
 
-                targets = result.data or []
-                new = self._apply_reserved_for_projects(
-                    register_jtag_discovery(targets)
-                )
-                if new:
-                    logger.info("[green]◇ discovery[/] new_devices=%d", len(new))
+                await self._handle_discovery_result(result.data or [])
         except asyncio.CancelledError:
             logger.debug("FPGA discovery task stopped")
             raise
+
+    async def _handle_discovery_failure(self, result: ActionResult) -> None:
+        for device in list_fpgas():
+            if _has_fault(device, FaultType.COMMUNICATION_LOST):
+                continue
+            updated = self._mark_communication_lost(device)
+            logger.warning(
+                "[yellow]◇ discovery[/] device=%s unavailable error=%s detail=%s fault=latched",
+                updated.device_id,
+                result.error,
+                result.stderr,
+            )
+            self._publish_state(updated)
+
+    async def _handle_discovery_result(self, targets: list[JTAGTargetContext]) -> None:
+        seen_device_ids = {target.cable_serial for target in targets}
+        new = self._apply_reserved_for_projects(
+            register_jtag_discovery(targets)
+        )
+        if new:
+            logger.info("[green]◇ discovery[/] new_devices=%d", len(new))
+
+        for device in list_fpgas():
+            if device.device_id in seen_device_ids:
+                if _has_fault(device, FaultType.COMMUNICATION_LOST):
+                    updated = clear_fault(device, FaultType.COMMUNICATION_LOST)
+                    logger.info("[green]◇ discovery[/] device=%s reconnected", updated.device_id)
+                    self._publish_state(updated)
+                continue
+
+            if _has_fault(device, FaultType.COMMUNICATION_LOST):
+                continue
+
+            updated = self._mark_communication_lost(device)
+            logger.warning("[yellow]◇ discovery[/] device=%s disconnected fault=latched", updated.device_id)
+            self._publish_state(updated)
 
     async def _telemetry_loop(self) -> None:
         try:
@@ -339,7 +376,11 @@ class Agent:
         devices = list_fpgas()
 
         for device in devices:
-            result = await asyncio.to_thread(self._actions.read_telemetry, device_state=device)
+            result = await asyncio.to_thread(
+                self._actions.read_telemetry,
+                device_state=device,
+                timeout_seconds=self.config.telemetry_timeout_seconds,
+            )
             if not self._running:
                 return
 
@@ -356,7 +397,8 @@ class Agent:
                 logger.debug("telemetry still unavailable device=%s error=%s detail=%s", device.device_id, result.error, result.stderr)
                 return
             logger.warning("[yellow]◇ telemetry[/] device=%s failed error=%s detail=%s fault=latched", device.device_id, result.error, result.stderr)
-            add_fault(device, FaultType.COMMUNICATION_LOST)
+            updated = self._mark_communication_lost(device)
+            self._publish_state(updated)
             return
 
         device = clear_fault(device, FaultType.COMMUNICATION_LOST)
@@ -387,6 +429,10 @@ class Agent:
             device.status,
             len(device.faults),
         )
+
+    def _mark_communication_lost(self, device: FPGAState) -> FPGAState:
+        updated = add_fault(device, FaultType.COMMUNICATION_LOST)
+        return update_fpga(updated, bitstream_id=None)
 
     def _publish_state(self, device: FPGAState) -> None:
         for queue in self._subscribers.get(device.device_id, set()).copy():

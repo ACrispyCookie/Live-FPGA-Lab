@@ -329,10 +329,12 @@ class TclSession:
                 self._script_path.unlink(missing_ok=True)
                 self._script_path = None
 
-    def run(self, script: str, *, timeout_seconds: int | None = None, marker: str = COMMAND_DONE_MARKER) -> ActionResult:
+    def run(self, script: str, *, timeout_seconds: float | None = None, marker: str = COMMAND_DONE_MARKER) -> ActionResult:
         with self._lock:
             if not self.running:
-                return _local_error(ActionError.NOT_STARTED, f"{self.name} session is not running")
+                started = self.start()
+                if not started.ok:
+                    return started
             process = self._process
             if process is None or process.stdin is None:
                 return _local_error(ActionError.NOT_STARTED, f"{self.name} session is not running")
@@ -355,24 +357,28 @@ class TclSession:
                 return ActionResult(False, ActionError.COMMAND_ERROR, self._command, stdout, command_error, started_at, finished_at)
             return ActionResult(True, None, self._command, stdout, "", started_at, finished_at)
 
-    def _read_until(self, marker: str, *, timeout_seconds: int) -> tuple[bool, str, str]:
+    def _read_until(self, marker: str, *, timeout_seconds: float) -> tuple[bool, str, str]:
         process = self._process
         if process is None or process.stdout is None:
             return False, "", "process is not running"
         deadline = datetime.now(UTC).timestamp() + timeout_seconds
-        lines: list[str] = []
+        chunks: list[str] = []
+        buffered = ""
         while datetime.now(UTC).timestamp() < deadline:
             remaining = max(0.0, deadline - datetime.now(UTC).timestamp())
             ready, _, _ = select.select([process.stdout], [], [], min(0.25, remaining))
             if ready:
-                line = process.stdout.readline()
-                if line:
-                    lines.append(line)
-                    if line.strip().startswith(marker):
-                        return True, "".join(lines), ""
+                data = os.read(process.stdout.fileno(), 4096)
+                if data:
+                    text = data.decode(errors="replace")
+                    chunks.append(text)
+                    buffered += text
+                    for line in buffered.splitlines():
+                        if line.strip().startswith(marker):
+                            return True, "".join(chunks), ""
             if process.poll() is not None:
-                return False, "".join(lines), f"process exited with {process.returncode}"
-        return False, "".join(lines), f"timed out waiting for {marker}"
+                return False, "".join(chunks), f"process exited with {process.returncode}"
+        return False, "".join(chunks), f"timed out waiting for {marker}"
 
     def _read_stderr(self) -> str:
         process = self._process
@@ -383,7 +389,16 @@ class TclSession:
             if not ready:
                 return ""
         try:
-            return process.stderr.read() or ""
+            chunks: list[str] = []
+            while True:
+                ready, _, _ = select.select([process.stderr], [], [], 0)
+                if not ready:
+                    break
+                data = os.read(process.stderr.fileno(), 4096)
+                if not data:
+                    break
+                chunks.append(data.decode(errors="replace"))
+            return "".join(chunks)
         except Exception:
             return ""
 
@@ -430,8 +445,8 @@ class BoardActions:
         self._vivado_session.stop()
         self._xsdb_session.stop()
 
-    def discover_jtag_targets(self) -> ActionResult:
-        result = self._run_xsdb(DISCOVER_JTAG_TARGETS_TCL, timeout_seconds=self.timeout_seconds, marker=TARGET_MARKER)
+    def discover_jtag_targets(self, *, timeout_seconds: float | None = None) -> ActionResult:
+        result = self._run_xsdb(DISCOVER_JTAG_TARGETS_TCL, timeout_seconds=timeout_seconds or self.timeout_seconds)
         if not result.ok:
             return result
         contexts = parse_xsdb_targets(result.stdout)
@@ -486,13 +501,13 @@ class BoardActions:
         )
         return self._run_xsdb(script, timeout_seconds=self.timeout_seconds, marker="fpga-agent: reset complete")
 
-    def read_telemetry(self, *, device_state: FPGAState) -> ActionResult:
+    def read_telemetry(self, *, device_state: FPGAState, timeout_seconds: float | None = None) -> ActionResult:
         script = _render_template(
             TELEMETRY_TCL,
             CABLE=device_state.target_ctx.cable_serial,
             FPGA_NAME=device_state.target_ctx.fpga_name,
         )
-        result = self._run_vivado(script, timeout_seconds=self.timeout_seconds)
+        result = self._run_vivado(script, timeout_seconds=timeout_seconds or self.timeout_seconds)
         if not result.ok:
             return result
         payload = parse_telemetry_payload(result.stdout) or {}
@@ -509,10 +524,10 @@ class BoardActions:
             )
         return _with_data(result, telemetry)
 
-    def _run_xsdb(self, script: str, *, timeout_seconds: int, marker: str = COMMAND_DONE_MARKER) -> ActionResult:
+    def _run_xsdb(self, script: str, *, timeout_seconds: float, marker: str = COMMAND_DONE_MARKER) -> ActionResult:
         return self._xsdb_session.run(script, timeout_seconds=timeout_seconds, marker=marker)
 
-    def _run_vivado(self, script: str, *, timeout_seconds: int) -> ActionResult:
+    def _run_vivado(self, script: str, *, timeout_seconds: float) -> ActionResult:
         return self._vivado_session.run(script, timeout_seconds=timeout_seconds, marker=TELEMETRY_MARKER)
 
 def parse_xsdb_targets(stdout: str) -> list[JTAGTargetContext]:
