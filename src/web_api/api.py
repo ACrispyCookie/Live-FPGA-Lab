@@ -9,7 +9,6 @@ import secrets
 import httpx
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, Response, StreamingResponse
-from starlette.background import BackgroundTask
 
 from .board import BoardError, BoardManager
 from .config import WebApiConfig
@@ -183,6 +182,7 @@ def create_api(board: BoardManager, proxy_client: httpx.AsyncClient, *, config: 
             stream=True,
             follow_redirects=False,
         )
+        await board.demo_connection_opened(user_id, session_id)
 
         response_headers = {
             key: value
@@ -190,11 +190,19 @@ def create_api(board: BoardManager, proxy_client: httpx.AsyncClient, *, config: 
             if key.lower() not in HOP_BY_HOP_HEADERS | {"content-length"}
         }
 
+        async def proxy_stream():
+            try:
+                async for chunk in response.aiter_raw():
+                    yield chunk
+            finally:
+                await response.aclose()
+                with suppress(Exception):
+                    await board.demo_connection_closed(user_id, session_id)
+
         return StreamingResponse(
-            response.aiter_raw(),
+            proxy_stream(),
             status_code=response.status_code,
             headers=response_headers,
-            background=BackgroundTask(response.aclose),
         )
 
     return router

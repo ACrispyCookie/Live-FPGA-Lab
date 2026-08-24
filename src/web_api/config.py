@@ -9,6 +9,7 @@ from pathlib import Path
 class SessionConfig:
     contended_session_seconds: int = 5 * 60
     handoff_seconds: int = 1 * 60
+    disconnected_session_timeout_seconds: float = 90.0
 
 
 @dataclass(frozen=True)
@@ -45,6 +46,10 @@ class WebApiConfig:
                     "WEB_API_SESSION_HANDOFF_SECONDS",
                     cls.session.handoff_seconds,
                 ),
+                disconnected_session_timeout_seconds=_env_float(
+                    "WEB_API_SESSION_DISCONNECTED_TIMEOUT_SECONDS",
+                    cls.session.disconnected_session_timeout_seconds,
+                ),
             ),
         )
 
@@ -57,6 +62,16 @@ def _env_int(name: str, default: int) -> int:
         return int(raw)
     except ValueError as exc:
         raise ValueError(f"{name} must be an integer") from exc
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        return float(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a number") from exc
 
 
 def _env_bool(name: str, default: bool) -> bool:

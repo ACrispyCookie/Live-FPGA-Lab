@@ -341,7 +341,7 @@ function recentStatus(session: NonNullable<Session>) {
 
 function recentTone(session: NonNullable<Session>): 'ok' | 'warn' | 'bad' | 'neutral' | 'info' {
   if (session.status !== 'ended') return sessionTone(session.status);
-  if (session.end_reason === 'expired' || session.end_reason === 'user_ended') return 'neutral';
+  if (session.end_reason === 'expired' || session.end_reason === 'user_ended' || session.end_reason === 'timed_out') return 'neutral';
   if (session.end_reason === 'cancelled') return 'warn';
   return 'bad';
 }

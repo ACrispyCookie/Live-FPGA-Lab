@@ -54,6 +54,8 @@ class BoardManager:
         self._flow_lock = asyncio.Lock()
 
         self._demo_runtime: dict[str, Any] | None = None
+        self._demo_connection_counts: dict[str, int] = {}
+        self._disconnect_tasks: dict[str, asyncio.Task] = {}
 
         self._subscribers: dict[str, set[asyncio.Queue[dict[str, Any]]]] = {}
 
@@ -90,6 +92,7 @@ class BoardManager:
         self._cancel_expiry()
 
         await self._stop_demo_runtime()
+        self._cancel_disconnect_timeouts()
 
         if self._watch_task:
             self._watch_task.cancel()
@@ -98,6 +101,28 @@ class BoardManager:
             self._watch_task = None
 
         self._subscribers.clear()
+
+    async def demo_connection_opened(self, user_id: str, session_id: str) -> None:
+        session = await self.sessions.get(session_id)
+        if session.user_id != user_id or session.status != SessionStatus.ACTIVE:
+            return
+
+        self._cancel_disconnect_timeout(session_id)
+        self._demo_connection_counts[session_id] = self._demo_connection_counts.get(session_id, 0) + 1
+
+    async def demo_connection_closed(self, user_id: str, session_id: str) -> None:
+        session = await self.sessions.get(session_id)
+        if session.user_id != user_id:
+            return
+
+        count = max(0, self._demo_connection_counts.get(session_id, 0) - 1)
+        if count:
+            self._demo_connection_counts[session_id] = count
+            return
+
+        self._demo_connection_counts.pop(session_id, None)
+        if session.status == SessionStatus.ACTIVE:
+            self._schedule_disconnect_timeout(session)
 
     async def snapshot_for(self, user_id: str) -> dict[str, Any]:
         return {
@@ -537,6 +562,40 @@ class BoardManager:
             name=f"session-expiry-{session.id}",
         )
 
+    def _schedule_disconnect_timeout(self, session: DemoSession) -> None:
+        self._cancel_disconnect_timeout(session.id)
+        delay = max(0.0, self.config.session.disconnected_session_timeout_seconds)
+        self._disconnect_tasks[session.id] = asyncio.create_task(
+            self._timeout_disconnected_session(session.id, delay),
+            name=f"session-disconnect-timeout-{session.id}",
+        )
+
+    async def _timeout_disconnected_session(self, session_id: str, delay: float) -> None:
+        try:
+            await asyncio.sleep(delay)
+            if self._demo_connection_counts.get(session_id, 0) > 0:
+                return
+
+            active = self.sessions.active
+            if (
+                not active
+                or active.id != session_id
+                or active.status != SessionStatus.ACTIVE
+            ):
+                return
+
+            await self._end_active_session(
+                SessionEndReason.TIMED_OUT,
+                "Demo connection timed out. Your session has ended.",
+                level="warning",
+                reset_board=True,
+            )
+        except asyncio.CancelledError:
+            raise
+        finally:
+            if self._disconnect_tasks.get(session_id) is asyncio.current_task():
+                self._disconnect_tasks.pop(session_id, None)
+
     async def _expire_session(self, session_id: str, expires_at: datetime) -> None:
         delay = max(0.0, (expires_at - datetime.now(UTC)).total_seconds())
 
@@ -554,38 +613,57 @@ class BoardManager:
         ):
             return
 
-        session = await self.sessions.begin_active_end(SessionEndReason.EXPIRED)
-        if session is None:
-            return
-
-        await self._publish_user(session.user_id, {
-            "type": "session.updated",
-            "session": _session_json(session),
-        })
-
-        await self._publish_user(session.user_id, {
-            "type": "ui.message",
-            "level": "warning",
-            "message": "Your FPGA session has expired.",
-        })
-
-        try:
-            await self._stop_demo_runtime()
-
-            if self.device_id:
-                await self.agent.reset(self.device_id)
-        except Exception:
-            logger.exception("failed to clean up board after session expiry")
-
-        ended = await self.sessions.finish_active()
-
-        if ended:
-            await self._publish_user(ended.user_id, {
-                "type": "session.updated",
-                "session": _session_json(ended),
-            })
+        await self._end_active_session(
+            SessionEndReason.EXPIRED,
+            "Your FPGA session has expired.",
+            level="warning",
+            reset_board=True,
+        )
 
         self._expiry_task = None
+
+    async def _end_active_session(
+        self,
+        reason: SessionEndReason,
+        message: str,
+        *,
+        level: str = "error",
+        reset_board: bool,
+    ) -> None:
+        async with self._flow_lock:
+            session = await self.sessions.begin_active_end(reason)
+            if session is None:
+                return
+
+            await self._publish_user(session.user_id, {
+                "type": "session.updated",
+                "session": _session_json(session),
+            })
+
+            await self._publish_user(session.user_id, {
+                "type": "ui.message",
+                "level": level,
+                "message": message,
+            })
+
+            try:
+                await self._stop_demo_runtime()
+
+                if reset_board and self.device_id:
+                    await self.agent.reset(self.device_id)
+            except Exception:
+                logger.exception("failed to clean up board after ending active session reason=%s", reason)
+
+            ended = await self.sessions.finish_active()
+
+            if ended:
+                self._demo_connection_counts.pop(ended.id, None)
+                self._cancel_disconnect_timeout(ended.id)
+                await self._publish_user(ended.user_id, {
+                    "type": "session.updated",
+                    "session": _session_json(ended),
+                })
+
         await self._publish_queue_updates()
         await self._try_start_next()
 
@@ -595,6 +673,15 @@ class BoardManager:
 
         if task and task is not asyncio.current_task():
             task.cancel()
+
+    def _cancel_disconnect_timeout(self, session_id: str) -> None:
+        task = self._disconnect_tasks.pop(session_id, None)
+        if task and task is not asyncio.current_task():
+            task.cancel()
+
+    def _cancel_disconnect_timeouts(self) -> None:
+        for session_id in list(self._disconnect_tasks):
+            self._cancel_disconnect_timeout(session_id)
 
     async def _publish_queue_updates(self) -> None:
         for user_id in list(self._subscribers):

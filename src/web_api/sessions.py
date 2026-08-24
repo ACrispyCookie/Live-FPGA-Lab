@@ -23,6 +23,7 @@ class SessionEndReason(str, Enum):
     USER_ENDED = "user_ended"
     CANCELLED = "cancelled"
     EXPIRED = "expired"
+    TIMED_OUT = "timed_out"
     FPGA_FAULT = "fpga_fault"
     BOARD_OFFLINE = "board_offline"
     PROGRAMMING_FAILED = "programming_failed"
