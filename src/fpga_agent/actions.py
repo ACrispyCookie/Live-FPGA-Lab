@@ -4,10 +4,12 @@ import json
 import logging
 import os
 import re
+import signal
 import select
 import subprocess
 import tempfile
 import threading
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
@@ -317,17 +319,31 @@ class TclSession:
                 try:
                     process.wait(timeout=2)
                 except Exception:
+                    self._terminate_process_group(process, signal.SIGTERM)
                     try:
-                        process.terminate()
                         process.wait(timeout=2)
                     except Exception:
-                        try:
-                            process.kill()
-                        except Exception:
-                            pass
+                        self._terminate_process_group(process, signal.SIGKILL)
+                        with suppress(Exception):
+                            process.wait(timeout=2)
             if self._script_path is not None:
                 self._script_path.unlink(missing_ok=True)
                 self._script_path = None
+
+    @staticmethod
+    def _terminate_process_group(process: subprocess.Popen[str], sig: signal.Signals) -> None:
+        try:
+            os.killpg(process.pid, sig)
+        except ProcessLookupError:
+            return
+        except Exception:
+            try:
+                if sig == signal.SIGTERM:
+                    process.terminate()
+                else:
+                    process.kill()
+            except Exception:
+                pass
 
     def run(self, script: str, *, timeout_seconds: float | None = None, marker: str = COMMAND_DONE_MARKER) -> ActionResult:
         with self._lock:

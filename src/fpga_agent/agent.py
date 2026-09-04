@@ -17,6 +17,8 @@ class AgentConfig:
     telemetry_interval_seconds: float = 1.0
     discovery_timeout_seconds: float = 5.0
     telemetry_timeout_seconds: float = 5.0
+    discovery_miss_threshold: int = 2
+    telemetry_failure_threshold: int = 2
 
     over_temperature_c: float = 75.0
     over_temperature_recovery_c: float = 60.0
@@ -35,6 +37,8 @@ class Agent:
         self._subscribers: dict[str, set[asyncio.Queue[FPGAState]]] = {}
         self._device_locks: dict[str, asyncio.Lock] = {}
         self._last_telemetry_log: dict[str, tuple[float | None, float]] = {}
+        self._discovery_misses: dict[str, int] = {}
+        self._telemetry_failures: dict[str, int] = {}
 
     async def start(self) -> None:
         if self._running:
@@ -329,16 +333,12 @@ class Agent:
 
     async def _handle_discovery_failure(self, result: ActionResult) -> None:
         for device in list_fpgas():
-            if _has_fault(device, FaultType.COMMUNICATION_LOST):
-                continue
-            updated = self._mark_communication_lost(device)
             logger.warning(
-                "[yellow]◇ discovery[/] device=%s unavailable error=%s detail=%s fault=latched",
-                updated.device_id,
+                "[yellow]◇ discovery[/] device=%s probe failed error=%s detail=%s fault=not-latched",
+                device.device_id,
                 result.error,
                 result.stderr,
             )
-            self._publish_state(updated)
 
     async def _handle_discovery_result(self, targets: list[JTAGTargetContext]) -> None:
         seen_device_ids = {target.cable_serial for target in targets}
@@ -350,10 +350,22 @@ class Agent:
 
         for device in list_fpgas():
             if device.device_id in seen_device_ids:
+                self._discovery_misses.pop(device.device_id, None)
                 if _has_fault(device, FaultType.COMMUNICATION_LOST):
                     updated = clear_fault(device, FaultType.COMMUNICATION_LOST)
                     logger.info("[green]◇ discovery[/] device=%s reconnected", updated.device_id)
                     self._publish_state(updated)
+                continue
+
+            misses = self._discovery_misses.get(device.device_id, 0) + 1
+            self._discovery_misses[device.device_id] = misses
+            if misses < self.config.discovery_miss_threshold:
+                logger.warning(
+                    "[yellow]◇ discovery[/] device=%s absent miss=%d/%d fault=not-latched",
+                    device.device_id,
+                    misses,
+                    self.config.discovery_miss_threshold,
+                )
                 continue
 
             if _has_fault(device, FaultType.COMMUNICATION_LOST):
@@ -393,14 +405,27 @@ class Agent:
 
     async def _handle_telemetry_update(self, device: FPGAState, result: ActionResult):
         if not result.ok:
+            failures = self._telemetry_failures.get(device.device_id, 0) + 1
+            self._telemetry_failures[device.device_id] = failures
             if _has_fault(device, FaultType.COMMUNICATION_LOST):
                 logger.debug("telemetry still unavailable device=%s error=%s detail=%s", device.device_id, result.error, result.stderr)
+                return
+            if failures < self.config.telemetry_failure_threshold:
+                logger.warning(
+                    "[yellow]◇ telemetry[/] device=%s failed error=%s detail=%s miss=%d/%d fault=not-latched",
+                    device.device_id,
+                    result.error,
+                    result.stderr,
+                    failures,
+                    self.config.telemetry_failure_threshold,
+                )
                 return
             logger.warning("[yellow]◇ telemetry[/] device=%s failed error=%s detail=%s fault=latched", device.device_id, result.error, result.stderr)
             updated = self._mark_communication_lost(device)
             self._publish_state(updated)
             return
 
+        self._telemetry_failures.pop(device.device_id, None)
         device = clear_fault(device, FaultType.COMMUNICATION_LOST)
         device = update_fpga(device, telemetry=result.data)
         self._log_telemetry_sample(device, result.data)
