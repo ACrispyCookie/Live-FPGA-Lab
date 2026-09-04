@@ -9,6 +9,7 @@ import select
 import subprocess
 import tempfile
 import threading
+import time
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -255,6 +256,7 @@ class TclSession:
         ready_marker: str,
         vivado_settings: Path,
         timeout_seconds: int,
+        cleanup_patterns: tuple[str, ...] = (),
     ) -> None:
         self.name = name
         self.executable = executable
@@ -263,6 +265,7 @@ class TclSession:
         self.ready_marker = ready_marker
         self.vivado_settings = Path(vivado_settings).expanduser()
         self.timeout_seconds = timeout_seconds
+        self.cleanup_patterns = cleanup_patterns
         self._lock = threading.RLock()
         self._process: subprocess.Popen[str] | None = None
         self._script_path: Path | None = None
@@ -329,6 +332,7 @@ class TclSession:
             if self._script_path is not None:
                 self._script_path.unlink(missing_ok=True)
                 self._script_path = None
+            self._cleanup_detached_helpers()
 
     @staticmethod
     def _terminate_process_group(process: subprocess.Popen[str], sig: signal.Signals) -> None:
@@ -344,6 +348,60 @@ class TclSession:
                     process.kill()
             except Exception:
                 pass
+
+    def _cleanup_detached_helpers(self) -> None:
+        if not self.cleanup_patterns:
+            return
+
+        current_pid = os.getpid()
+        for proc_dir in Path("/proc").glob("[0-9]*"):
+            try:
+                pid = int(proc_dir.name)
+            except ValueError:
+                continue
+            if pid == current_pid:
+                continue
+
+            try:
+                cmdline = (proc_dir / "cmdline").read_bytes().replace(b"\0", b" ").decode(errors="ignore")
+            except Exception:
+                continue
+
+            if not cmdline or not any(pattern in cmdline for pattern in self.cleanup_patterns):
+                continue
+
+            logger.warning("cleaning up detached %s helper pid=%s cmd=%s", self.name, pid, cmdline[:160])
+            with suppress(ProcessLookupError, PermissionError):
+                os.kill(pid, signal.SIGTERM)
+
+        time_limit = datetime.now(UTC).timestamp() + 2.0
+        while datetime.now(UTC).timestamp() < time_limit:
+            if not self._matching_helper_pids():
+                return
+            time.sleep(0.05)
+
+        for pid in self._matching_helper_pids():
+            logger.warning("force killing detached %s helper pid=%s", self.name, pid)
+            with suppress(ProcessLookupError, PermissionError):
+                os.kill(pid, signal.SIGKILL)
+
+    def _matching_helper_pids(self) -> list[int]:
+        matches: list[int] = []
+        current_pid = os.getpid()
+        for proc_dir in Path("/proc").glob("[0-9]*"):
+            try:
+                pid = int(proc_dir.name)
+            except ValueError:
+                continue
+            if pid == current_pid:
+                continue
+            try:
+                cmdline = (proc_dir / "cmdline").read_bytes().replace(b"\0", b" ").decode(errors="ignore")
+            except Exception:
+                continue
+            if cmdline and any(pattern in cmdline for pattern in self.cleanup_patterns):
+                matches.append(pid)
+        return matches
 
     def run(self, script: str, *, timeout_seconds: float | None = None, marker: str = COMMAND_DONE_MARKER) -> ActionResult:
         with self._lock:
@@ -449,6 +507,7 @@ class BoardActions:
             ready_marker=VIVADO_READY_MARKER,
             vivado_settings=self.vivado_settings,
             timeout_seconds=self.timeout_seconds,
+            cleanup_patterns=("/cs_server", "xsdb-server.tcl"),
         )
 
     def start(self) -> ActionResult:
