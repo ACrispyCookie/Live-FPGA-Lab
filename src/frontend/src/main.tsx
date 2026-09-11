@@ -321,7 +321,7 @@ function RecentSessions({ sessions, demos }: { sessions: NonNullable<Session>[];
       <div className="recent-list">
         {sessions.filter(wasOnBoard).length ? sessions.filter(wasOnBoard).slice(0, 4).map((session) => {
           const demo = demos.find((item) => item.id === session.demo_id);
-          return <div className="recent-row" key={session.id}><span className={`signal ${recentTone(session)}`} /><strong>{demo?.name || titleCase(session.demo_id)}</strong><small>{recentStatus(session)}{session.ended_at ? ` · ended ${new Date(session.ended_at).toLocaleTimeString()}` : ''}</small></div>;
+          return <div className="recent-row" key={session.id}><span className={`signal ${recentTone(session)}`} /><strong>{demo?.name || titleCase(session.demo_id)}</strong><small>{recentStatus(session)}{session.ended_at ? ` · ended ${formatRecentSessionTime(session.ended_at)}` : ''}</small></div>;
         }) : <div className="empty compact">No recent board sessions.</div>}
       </div>
     </Section>
@@ -337,6 +337,16 @@ function wasOnBoard(session: NonNullable<Session>) {
 function recentStatus(session: NonNullable<Session>) {
   if (session.status === 'ended') return session.end_reason ? titleCase(session.end_reason) : 'Ended';
   return sessionLabel(session);
+}
+
+function formatRecentSessionTime(value: string) {
+  const endedAt = new Date(value);
+  const today = new Date();
+  const time = endedAt.toLocaleTimeString();
+  const isToday = endedAt.getFullYear() === today.getFullYear()
+    && endedAt.getMonth() === today.getMonth()
+    && endedAt.getDate() === today.getDate();
+  return isToday ? time : `${endedAt.toLocaleDateString()} ${time}`;
 }
 
 function recentTone(session: NonNullable<Session>): 'ok' | 'warn' | 'bad' | 'neutral' | 'info' {
