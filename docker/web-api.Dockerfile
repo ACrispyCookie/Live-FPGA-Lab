@@ -22,7 +22,7 @@ ENV PYTHONUNBUFFERED=1 \
     WEB_API_AGENT_SOCKET=/run/fpga-agent/fpga-agent.sock
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends bash ca-certificates \
+    && apt-get install -y --no-install-recommends bash ca-certificates ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml ./

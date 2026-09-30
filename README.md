@@ -9,7 +9,8 @@ The current app is built around one physical FPGA board and one active user sess
 ```text
 .
 ├── demos/
-│   └── gpgpu-nbody/           # Example Zynq PS/PL GPGPU n-body demo
+│   ├── gpgpu-nbody/           # Example Zynq PS/PL GPGPU n-body demo
+│   └── dvd-logo-video/        # FPGA HDMI output captured through V4L2
 ├── src/
 │   ├── fpga_agent/            # Local hardware agent; talks to the FPGA board
 │   ├── web_api/               # FastAPI web app, queue/session manager, WS API
@@ -174,6 +175,16 @@ The web API reads configuration from environment variables in `src/web_api/confi
 | `WEB_API_SESSION_CONTENDED_SECONDS` | `300` | Active-session time window once someone is waiting |
 | `WEB_API_SESSION_HANDOFF_SECONDS` | `60` | Handoff/reset window between sessions |
 
+The HDMI capture demo also uses these Compose settings:
+
+| Variable | Default | Purpose |
+|---|---:|---|
+| `DEMO_VIDEO_HOST_DEVICE` | `/dev/video0` | V4L2 capture node on the Docker host |
+| `DEMO_VIDEO_SIZE` | `640x480` | Capture-card input mode |
+| `DEMO_VIDEO_FPS` | `60` | Capture frame rate |
+| `DEMO_VIDEO_INPUT_FORMAT` | `mjpeg` | V4L2 pixel format passed through to browsers |
+| `DVD_LOGO_BITSTREAM` | `/app/demos/dvd-logo-video/bitstream/dvd_logo.bit` | Optional in-container bitstream override |
+
 Example:
 
 ```bash
@@ -256,7 +267,7 @@ Path fields are resolved relative to the demo folder unless they are absolute pa
 
 The loader also accepts `DEMO` for older demo definitions, but new demos should use `DEMO_DEFINITION`.
 
-## Current bundled demo
+## Current bundled demos
 
 `demos/gpgpu-nbody/` contains the current GPGPU n-body demo:
 
@@ -265,6 +276,21 @@ The loader also accepts `DEMO` for older demo definitions, but new demos should 
 - PS application ELF: `boot/gpgpu_app.elf`
 - interactive frontend/backend code under `demo/`
 - runtime/program code under `programs/`
+
+`demos/dvd-logo-video/` provides an embedded live view of the FPGA HDMI
+output through a USB capture card. It uses FFmpeg to pass the capture card's
+MJPEG frames into a browser-compatible multipart MJPEG stream, avoiding a
+second video encode.
+
+The DVD logo bitstream is intentionally not included. Add it as:
+
+```text
+demos/dvd-logo-video/bitstream/dvd_logo.bit
+```
+
+Then restart `web-api`. The demo automatically programs that file when it is
+present; without it, the session skips programming and only starts the capture
+viewer. The source project is <https://github.com/ACrispyCookie/DVD-Logo-FPGA>.
 
 ## Troubleshooting
 
@@ -345,11 +371,19 @@ On the x86 host:
    ```
 
    The Compose file does this by mounting the host path from `HOST_XILINX_DIR` back to the same path read-only. Avoid remapping Xilinx to a different container path like `/opt/Xilinx`; generated `settings64.sh` files can source sibling files by absolute install path.
-3. Plug in the FPGA JTAG/USB cable and the demo UART device.
+3. Plug in the FPGA JTAG/USB cable, the demo UART device, and the HDMI-to-USB
+   capture card.
 4. Confirm the UART device path, usually:
 
    ```text
    /dev/ttyUSB0
+   ```
+5. Identify the capture node. Use the node that reports `Video Capture`, not a
+   companion `Metadata Capture` node:
+
+   ```bash
+   v4l2-ctl -d /dev/video0 --all
+   v4l2-ctl -d /dev/video0 --list-formats-ext
    ```
 
 ### Configure Compose
@@ -365,7 +399,10 @@ Edit at least these values:
 ```env
 HOST_XILINX_DIR=/home/njason/Xilinx
 FPGA_AGENT_VIVADO_SETTINGS=/home/njason/Xilinx/2025.2/Vivado/settings64.sh
-HOST_DEMO_UART=/dev/ttyUSB1
+DEMO_UART_PORT=/dev/ttyUSB0
+DEMO_VIDEO_HOST_DEVICE=/dev/video0
+DEMO_VIDEO_SIZE=640x480
+DEMO_VIDEO_FPS=60
 WEB_API_PUBLISHED_PORT=9121
 ```
 
