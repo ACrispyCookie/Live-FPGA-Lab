@@ -5,11 +5,14 @@ import json
 import logging
 import signal
 import threading
+from urllib.parse import urlsplit
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import cast
 
-from web_api.video import VideoConfig, VideoService, build_ffmpeg_command
+from web_api.video import VideoConfig, VideoService, build_ffmpeg_command, render_video_page
 
 
 LOG = logging.getLogger("dvd-logo-video")
@@ -84,13 +87,46 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         path = self.path.split("?", 1)[0]
         if path in {"", "/", "/index.html"}:
-            self._send_bytes("text/html; charset=utf-8", PAGE.encode())
+            self._send_bytes("text/html; charset=utf-8", render_video_page(
+                stream_url="stream.mjpg", offer_url="webrtc/offer",
+                transport=getattr(getattr(cast(CaptureServer, self.server).service, 'config', None),
+                                  'transport', 'webrtc'),
+            ).encode())
         elif path == "/health":
             self._send_bytes("application/json", json.dumps({"status": "ok"}).encode())
         elif path == "/stream.mjpg":
             self._stream_video()
         else:
             self.send_error(HTTPStatus.NOT_FOUND)
+
+    def do_POST(self) -> None:
+        if urlsplit(self.path).path != '/webrtc/offer':
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        length = int(self.headers.get('Content-Length', '0'))
+        if not 0 < length <= 100_000:
+            self.send_error(HTTPStatus.BAD_REQUEST)
+            return
+        try:
+            payload = json.loads(self.rfile.read(length))
+            if payload.get('type') != 'offer' or not isinstance(payload.get('sdp'), str) or not payload['sdp']:
+                raise ValueError('Invalid offer')
+        except (ValueError, AttributeError):
+            self.send_error(HTTPStatus.BAD_REQUEST)
+            return
+        try:
+            request = Request('http://127.0.0.1:1984/api/webrtc?src=fpga',
+                              data=json.dumps(payload).encode(),
+                              headers={'Content-Type': 'application/json'})
+            with urlopen(request, timeout=20) as response:
+                answer = json.load(response)
+            if answer.get('type') != 'answer' or not answer.get('sdp'):
+                raise ValueError('Invalid media answer')
+        except (HTTPError, URLError, TimeoutError, ValueError) as exc:
+            LOG.warning('WebRTC signaling failed: %s', exc)
+            self.send_error(HTTPStatus.BAD_GATEWAY)
+            return
+        self._send_bytes('application/json', json.dumps(answer).encode())
 
     def _send_bytes(self, content_type: str, body: bytes) -> None:
         self.send_response(HTTPStatus.OK)

@@ -34,6 +34,7 @@ services:
       # because Xilinx cable drivers often need broad USB/udev access.
       - /dev/bus/usb:/dev/bus/usb
       - ${DEMO_HOST_DIR:-/home/njason/demos}:/app/demos
+      - /home/njason/upload:/app
     healthcheck:
       test: ["CMD-SHELL", "test -S /run/fpga-agent/fpga-agent.sock"]
       interval: 10s
@@ -49,14 +50,16 @@ services:
     container_name: fpga-web-api
     restart: unless-stopped
     init: true
+    # ICE host candidates must be reachable from browsers, not Docker bridge IPs.
+    # This is LAN/VPN direct connectivity; internet clients require TURN or routing.
+    network_mode: host
     depends_on:
       fpga-agent:
         condition: service_healthy
-    ports:
-      - "${WEB_API_PUBLISHED_PORT:-9121}:9121"
+
     environment:
       WEB_API_HOST: 0.0.0.0
-      WEB_API_PORT: 9121
+      WEB_API_PORT: ${WEB_API_PUBLISHED_PORT:-9121}
       WEB_API_AGENT_SOCKET: ${FPGA_AGENT_SOCKET:-/run/fpga-agent/fpga-agent.sock}
       WEB_API_DEMO_DIR: /app/demos
       WEB_API_COOKIE_SECURE: ${WEB_API_COOKIE_SECURE:-false}
@@ -65,6 +68,7 @@ services:
       WEB_API_SESSION_CONTENDED_SECONDS: ${WEB_API_SESSION_CONTENDED_SECONDS:-300}
       WEB_API_SESSION_HANDOFF_SECONDS: ${WEB_API_SESSION_HANDOFF_SECONDS:-60}
       WEB_API_VIDEO_ENABLE_FILE: ${WEB_API_VIDEO_ENABLE_FILE:-/run/fpga-video-enabled}
+      WEB_API_VIDEO_TRANSPORT: ${WEB_API_VIDEO_TRANSPORT:-webrtc}
       DEMO_UART_PORT: ${DEMO_UART_PORT:-/dev/ttyUSB1}
       DEMO_UART_BAUD: ${DEMO_UART_BAUD:-115200}
       DEMO_VIDEO_DEVICE: /dev/fpga-video
@@ -83,11 +87,24 @@ services:
       - ${DEMO_UART_PORT:-/dev/ttyUSB1}:${DEMO_UART_PORT:-/dev/ttyUSB1}
       - ${DEMO_VIDEO_HOST_DEVICE:-/dev/video0}:/dev/fpga-video
     healthcheck:
-      test: ["CMD-SHELL", "python - <<'PY'\nfrom urllib.request import urlopen\nwith urlopen('http://127.0.0.1:9121/api/status', timeout=3) as r:\n    raise SystemExit(0 if r.status == 200 else 1)\nPY"]
+      test: ["CMD-SHELL", "python - <<'PY'\nimport os\nfrom urllib.request import urlopen\nwith urlopen('http://127.0.0.1:' + os.environ['WEB_API_PORT'] + '/api/status', timeout=3) as r:\n    raise SystemExit(0 if r.status == 200 else 1)\nPY"]
       interval: 10s
       timeout: 5s
       retries: 12
       start_period: 30s
+
+  go2rtc:
+    image: ghcr.io/alexxit/go2rtc:1.9.14
+    container_name: fpga-go2rtc
+    restart: unless-stopped
+    # Host networking keeps the API loopback-only and ICE on one fixed port.
+    network_mode: host
+    environment:
+      WEBRTC_MEDIA_PORT: ${WEBRTC_MEDIA_PORT:-8555}
+      WEBRTC_PUBLIC_HOST: ${WEBRTC_PUBLIC_HOST:-stun}
+      WEB_API_PUBLISHED_PORT: ${WEB_API_PUBLISHED_PORT:-9121}
+    volumes:
+      - ./go2rtc.yaml:/config/go2rtc.yaml:ro
 
 volumes:
   fpga-agent-run:

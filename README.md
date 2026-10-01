@@ -278,9 +278,11 @@ The loader also accepts `DEMO` for older demo definitions, but new demos should 
 - interactive frontend/backend code under `demo/`
 - runtime/program code under `programs/`
 
-`demos/dvd-logo-video/` provides an embedded live view of the FPGA HDMI
-output through a USB capture card. By default FFmpeg passes the card's MJPEG
-output into a browser-compatible multipart stream.
+`demos/dvd-logo-video/` provides an embedded, screen-fitting live view of the
+FPGA HDMI output through a USB capture card. Its MJPEG/WebRTC selector works
+inside the authenticated demo iframe and in a new tab; video uses `object-fit:
+contain` to preserve its aspect ratio on phones and desktops. By default FFmpeg
+passes the card's MJPEG output into a browser-compatible multipart stream.
 
 The DVD logo bitstream is intentionally not included. Add it as:
 
@@ -314,6 +316,34 @@ both can be viewed at the same time. Disabling `/video` only closes standalone
 viewers; an active demo keeps its capture lease until the session ends. The
 producer stops once neither an enabled standalone viewer nor a demo needs it.
 
+`/video` has one transport selector: MJPEG or WebRTC. The default is controlled
+by `WEB_API_VIDEO_TRANSPORT=mjpeg|webrtc` (default `webrtc`); a viewer's
+`/video?transport=webrtc` or `/video?transport=mjpeg` selection overrides it.
+The standalone gate controls both. WebRTC negotiation is proxied by web-api to
+a loopback-only go2rtc API. go2rtc reads an internal MJPEG feed on loopback
+(available while the standalone gate or DVD demo is active). Both browser
+transports share one V4L2 producer; go2rtc transcodes JPEG to H.264 once for
+WebRTC viewers. The pinned
+go2rtc build advertises H.264/H.265, not VP8; clients must support H.264.
+The DVD demo's WebRTC offer travels through its authenticated session proxy;
+it does not require enabling the standalone `/video` page.
+
+`DEMO_VIDEO_INPUT_FORMAT` configures the **capture card's V4L2 pixel format**
+(normally `mjpeg`, optionally `yuyv422`). It is not the browser transport:
+putting `webrtc` there makes FFmpeg exit and prevents demo startup. Use the
+on-page selector or `WEB_API_VIDEO_TRANSPORT` for browser transport instead.
+
+For WAN, forward **the same TCP and UDP port** from the router to the vm2 host:
+`WEBRTC_MEDIA_PORT=8555` by default. Set `WEBRTC_PUBLIC_HOST` to a public DNS
+name or IP pointing at that router (`fpga.njason.dev` on vm2); otherwise go2rtc
+tries STUN discovery, which may not advertise the forwarded port. The port
+belongs to go2rtc's ICE media listener, **not** the HTTPS `/video` page or the
+private control API on 127.0.0.1:1984. Signaling still uses the existing HTTPS
+reverse proxy. Router/firewall rules, CGNAT, some NAT types, and client networks
+may still prevent a direct connection; there is no TURN relay. Changing
+transport cannot remove the capture card's startup interval before visible
+picture arrives.
+
 On the deployed USB2 Video capture card, timed sessions have delivered identical
 black frames until roughly 12 seconds after demo activation. One YUYV/30-FPS
 trial displayed video within about one second, but two repeat YUYV trials took
@@ -329,7 +359,7 @@ DEMO_VIDEO_FPS=30
 
 MJPEG passthrough minimizes CPU use but preserves any card-generated JPEG
 corruption. YUYV bypasses its JPEG encoder at higher USB bandwidth and local
-encoding cost. An all-black frame is reported as "No signal" on `/video`;
+encoding cost. An all-black frame is reported as "No visible video" on `/video`;
 this is an image-content heuristic, not a hardware HDMI-lock sensor.
 
 ## Troubleshooting

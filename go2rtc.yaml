@@ -1,0 +1,17 @@
+# Only the ICE media port is meant to be forwarded from the WAN.
+# Keep the control API on localhost; the web API gates SDP negotiation.
+api:
+  listen: "127.0.0.1:1984"
+rtsp:
+  # FFmpeg feeds H.264 to go2rtc via this private loopback RTSP listener.
+  listen: "127.0.0.1:8554"
+srtp:
+  listen: ""
+ffmpeg:
+  h264: "-codec:v libx264 -g 30 -preset:v superfast -tune:v zerolatency -profile:v baseline -level:v 3.0 -pix_fmt:v yuv420p"
+webrtc:
+  listen: ":${WEBRTC_MEDIA_PORT:8555}"
+  candidates:
+    - "${WEBRTC_PUBLIC_HOST:stun}:${WEBRTC_MEDIA_PORT:8555}"
+streams:
+  fpga: "ffmpeg:http://127.0.0.1:${WEB_API_PUBLISHED_PORT:9121}/video/internal/stream.mjpg#video=h264"

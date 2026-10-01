@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import anyio
+import httpx
 import logging
 import os
 import subprocess
@@ -9,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import AsyncIterator, Protocol
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 
 
@@ -26,27 +27,51 @@ VIDEO_PAGE = """<!doctype html>
     :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
     * { box-sizing: border-box; }
     html, body { width: 100%; height: 100%; margin: 0; background: #05070a; }
-    body { display: grid; place-items: center; overflow: hidden; }
-    img { display: block; width: 100%; height: 100%; object-fit: contain; }
-    .badge { position: fixed; top: 14px; left: 14px; display: flex; align-items: center; gap: 8px;
+    body { position: relative; min-height: 100vh; min-height: 100dvh; overflow: hidden; }
+    img, video { display: block; position: absolute; inset: 0; width: 100%; height: 100%;
+      max-width: 100vw; max-height: 100vh; max-height: 100dvh; object-fit: contain; }
+    [hidden] { display: none !important; }
+    .controls { position: absolute; z-index: 2; top: 14px; left: 14px;
+      display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+    .badge { display: flex; align-items: center; gap: 8px;
       padding: 7px 10px; border: 1px solid #30363d; border-radius: 999px;
       background: rgb(13 17 23 / 82%); color: #e6edf3; font-size: 12px; }
     .dot { width: 8px; height: 8px; border-radius: 50%; background: #d29922; }
     body.has-signal .dot { background: #3fb950; box-shadow: 0 0 10px #3fb950; }
-    .message { position: fixed; inset: 0; display: grid; place-content: center; gap: 8px;
+    .message { position: absolute; inset: 0; display: grid; place-content: center; gap: 8px;
       text-align: center; padding: 24px; background: rgb(5 7 10 / 78%); color: #e6edf3; }
     .message strong { font-size: clamp(22px, 4vw, 32px); }
     .message span { font-size: 14px; color: #aab3bd; }
     body.has-signal .message { display: none; }
+    .switch { color: #e6edf3;
+      border: 1px solid #30363d; border-radius: 999px; padding: 7px 12px;
+      background: rgb(13 17 23 / 82%); font-size: 12px; }
+    .switch select { color: inherit; background: #0d1117; border: 0; font: inherit; }
+    @media (max-width: 480px) { .controls { top: 10px; left: 10px; } }
   </style>
 </head>
 <body>
-  <img id="capture" src="/video/stream.mjpg" alt="Live FPGA video output" />
-  <div class="badge"><span class="dot"></span><span id="signal-status">Checking video signal</span></div>
+  <img id="capture" alt="Live FPGA video output" />
+  <video id="rtc" autoplay playsinline muted hidden></video>
+  <div class="controls">
+    <div class="badge"><span class="dot"></span><span id="signal-status">Checking video signal</span></div>
+    <label class="switch">Transport <select id="transport"><option value="mjpeg">MJPEG</option>
+      <option value="webrtc">WebRTC</option></select></label>
+  </div>
   <div class="message" role="status"><strong id="signal-message">Waiting for video output…</strong>
     <span>The capture card may take a moment to detect the FPGA HDMI output.</span></div>
   <script>
     const video = document.getElementById('capture');
+    const rtc = document.getElementById('rtc');
+    const transport = document.getElementById('transport');
+    const requested = new URLSearchParams(location.search).get('transport');
+    const mode = ['mjpeg', 'webrtc'].includes(requested) ? requested : '__DEFAULT_TRANSPORT__';
+    transport.value = mode;
+    transport.addEventListener('change', () => {
+      location.search = '?transport=' + encodeURIComponent(transport.value);
+    });
+    if (mode === 'webrtc') { video.hidden = true; rtc.hidden = false; }
+    else video.src = '__STREAM_URL__';
     const status = document.getElementById('signal-status');
     const message = document.getElementById('signal-message');
     const probe = document.createElement('canvas');
@@ -54,21 +79,23 @@ VIDEO_PAGE = """<!doctype html>
     probe.height = 72;
     const context = probe.getContext('2d', { willReadFrequently: true });
     let darkSamples = 0;
+    let transportError = '';
 
     function showSignal(present) {
       document.body.classList.toggle('has-signal', present);
-      status.textContent = present ? 'Video signal detected' : 'No signal';
-      message.textContent = 'No signal detected';
+      status.textContent = transportError || (present ? 'Visible video' : 'No visible video');
+      message.textContent = transportError || 'No visible video';
     }
     // Some UVC cards output valid, all-black JPEGs while HDMI is absent.
     // This is a picture-content heuristic, not a hardware HDMI-lock reading.
     function inspectFrame() {
-      if (!video.naturalWidth || !video.naturalHeight || !context) {
+      const picture = mode === 'webrtc' ? rtc : video;
+      if (!(picture.videoWidth || picture.naturalWidth) || !context) {
         showSignal(false);
         return;
       }
       try {
-        context.drawImage(video, 0, 0, probe.width, probe.height);
+        context.drawImage(picture, 0, 0, probe.width, probe.height);
         const pixels = context.getImageData(0, 0, probe.width, probe.height).data;
         let visible = 0;
         for (let i = 0; i < pixels.length; i += 4) {
@@ -86,15 +113,56 @@ VIDEO_PAGE = """<!doctype html>
       }
     }
     video.addEventListener('error', () => {
+      transportError = 'Stream disconnected';
       showSignal(false);
-      setTimeout(() => { video.src = '/video/stream.mjpg?retry=' + Date.now(); }, 2000);
+      setTimeout(() => { if (mode === 'mjpeg') video.src = '__STREAM_URL__?retry=' + Date.now(); }, 2000);
     });
+    video.addEventListener('load', () => { transportError = ''; });
+    if (mode === 'webrtc') (async () => {
+      const codecs = RTCRtpReceiver.getCapabilities('video')?.codecs || [];
+      if (!codecs.some(codec => codec.mimeType.toLowerCase() === 'video/h264')) {
+        transportError = 'WebRTC requires H.264 support in this browser';
+        showSignal(false);
+        return;
+      }
+      const pc = new RTCPeerConnection();
+      pc.addTransceiver('video', { direction: 'recvonly' });
+      pc.ontrack = event => { rtc.srcObject = event.streams[0] || new MediaStream([event.track]); };
+      pc.onconnectionstatechange = () => {
+        if (['failed', 'closed', 'disconnected'].includes(pc.connectionState)) {
+          transportError = 'Stream disconnected';
+          showSignal(false);
+        }
+      };
+      window.addEventListener('pagehide', () => pc.close(), { once: true });
+      try {
+        await pc.setLocalDescription(await pc.createOffer());
+        const response = await fetch('__OFFER_URL__', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type })
+        });
+        if (!response.ok) throw new Error('Signaling HTTP ' + response.status);
+        await pc.setRemoteDescription(await response.json());
+      } catch (error) {
+        transportError = 'WebRTC unavailable: ' + error.message;
+        showSignal(false);
+        pc.close();
+      }
+    })();
     setInterval(inspectFrame, 500);
   </script>
 </body>
 </html>
 """
 
+
+def render_video_page(*, stream_url: str = '/video/stream.mjpg',
+                      offer_url: str = '/video/webrtc/offer',
+                      transport: str = 'webrtc') -> str:
+    """Reuse the responsive viewer inside a demo iframe or /video."""
+    return (VIDEO_PAGE.replace('__STREAM_URL__', stream_url)
+            .replace('__OFFER_URL__', offer_url)
+            .replace('__DEFAULT_TRANSPORT__', transport))
 
 @dataclass(frozen=True)
 class VideoConfig:
@@ -103,9 +171,13 @@ class VideoConfig:
     size: str = "640x480"
     fps: int = 60
     input_format: str = "mjpeg"
+    transport: str = "webrtc"
 
     @classmethod
     def from_env(cls) -> "VideoConfig":
+        transport = os.environ.get("WEB_API_VIDEO_TRANSPORT", cls.transport).lower()
+        if transport not in {"mjpeg", "webrtc"}:
+            raise ValueError("WEB_API_VIDEO_TRANSPORT must be mjpeg or webrtc")
         return cls(
             enable_file=Path(os.environ.get("WEB_API_VIDEO_ENABLE_FILE", str(cls.enable_file))),
             device=os.environ.get("WEB_API_VIDEO_DEVICE", os.environ.get("DEMO_VIDEO_DEVICE", cls.device)),
@@ -115,6 +187,7 @@ class VideoConfig:
                 "WEB_API_VIDEO_INPUT_FORMAT",
                 os.environ.get("DEMO_VIDEO_INPUT_FORMAT", cls.input_format),
             ),
+            transport=transport,
         )
 
 
@@ -137,6 +210,10 @@ class _VideoService(Protocol):
     gate: VideoGate
 
     def mjpeg_stream(self) -> AsyncIterator[bytes]: ...
+    def acquire_viewer(self) -> object | None: ...
+    def release_viewer(self, token: object) -> None: ...
+    def viewer_active(self, token: object | None) -> bool: ...
+    def wait_for_frame(self, after: int, timeout: float = 5) -> tuple[int, bytes | None]: ...
 
 
 class _Capture(Protocol):
@@ -325,6 +402,27 @@ class VideoService:
     def wait_for_frame(self, after: int, timeout: float = 5) -> tuple[int, bytes | None]:
         return self.capture.wait_for_frame(after, timeout)
 
+    def demo_active(self) -> bool:
+        with self._viewer_lock:
+            return bool(self._demo_tokens) and not self._closed
+
+    async def internal_mjpeg_stream(self) -> AsyncIterator[bytes]:
+        """Loopback media feed; capture ownership belongs to the demo/viewers."""
+        sequence = 0
+        token = self.acquire_viewer() if self.gate.enabled() else None
+        try:
+            while self.demo_active() or (token is not None and self.viewer_active(token)):
+                sequence, frame = await anyio.to_thread.run_sync(
+                    self.wait_for_frame, sequence, 0.2, abandon_on_cancel=True,
+                )
+                if frame is not None:
+                    yield (f'--{BOUNDARY}\r\nContent-Type: image/jpeg\r\n'
+                           f'Content-Length: {len(frame)}\r\n\r\n').encode() + frame + b'\r\n'
+        finally:
+            if token is not None:
+                with anyio.CancelScope(shield=True):
+                    await anyio.to_thread.run_sync(self.release_viewer, token)
+
     async def mjpeg_stream(self) -> AsyncIterator[bytes]:
         token = None
         sequence = 0
@@ -395,6 +493,15 @@ class VideoService:
                 raise
             return token
 
+    def acquire_viewer(self) -> object | None:
+        return self._viewer_opened()
+
+    def release_viewer(self, token: object) -> None:
+        self._viewer_closed(token)
+
+    def viewer_active(self, token: object | None) -> bool:
+        return self._viewer_active(token)
+
     def _viewer_active(self, token: object | None) -> bool:
         with self._viewer_lock:
             return token in self._viewer_tokens and self.gate.enabled() and not self._closed
@@ -422,13 +529,27 @@ def get_video_service() -> VideoService:
         return _video_service
 
 
-def create_video_router(service: _VideoService) -> APIRouter:
+def create_video_router(service: _VideoService, *, webrtc_client: httpx.AsyncClient | None = None) -> APIRouter:
+    from .webrtc import create_webrtc_router
+
     router = APIRouter()
+    router.include_router(create_webrtc_router(service, webrtc_client))
 
     @router.get("/video", include_in_schema=False)
     async def video_page() -> HTMLResponse:
         _require_enabled(service)
-        return HTMLResponse(VIDEO_PAGE, headers={"Cache-Control": "no-store"})
+        default = getattr(getattr(service, "config", None), "transport", "webrtc")
+        return HTMLResponse(render_video_page(transport=default), headers={"Cache-Control": "no-store"})
+
+    @router.get('/video/internal/stream.mjpg', include_in_schema=False)
+    async def internal_stream(request: Request) -> StreamingResponse:
+        if request.client is None or request.client.host not in {'127.0.0.1', '::1'}:
+            raise HTTPException(404)
+        if not getattr(service, 'demo_active', lambda: False)() and not service.gate.enabled():
+            raise HTTPException(404)
+        return StreamingResponse(service.internal_mjpeg_stream(),
+                                 media_type=f'multipart/x-mixed-replace; boundary={BOUNDARY}',
+                                 headers={'Cache-Control': 'no-store'})
 
     @router.get("/video/stream.mjpg", include_in_schema=False)
     async def video_stream() -> StreamingResponse:
