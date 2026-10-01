@@ -16,6 +16,7 @@ from .agent_client import AgentClient
 from .api import create_api
 from .board import BoardManager
 from .config import WebApiConfig
+from .video import create_video_router, get_video_service
 
 logging.basicConfig(
     level=logging.INFO,
@@ -30,6 +31,7 @@ config = WebApiConfig.from_env()
 agent = AgentClient(config.agent_socket)
 proxy_client = httpx.AsyncClient(timeout=httpx.Timeout(5.0, read=None))
 board = BoardManager(agent, config=config)
+video = get_video_service()
 
 
 @asynccontextmanager
@@ -38,6 +40,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        video.close()
         await board.stop()
         await agent.close()
         await proxy_client.aclose()
@@ -79,6 +82,7 @@ async def anonymous_user(request: Request, call_next):
 
 
 app.include_router(create_api(board, proxy_client, config=config))
+app.include_router(create_video_router(video))
 
 
 @app.get("/", include_in_schema=False)

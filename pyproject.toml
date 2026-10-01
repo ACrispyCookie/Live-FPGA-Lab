@@ -21,6 +21,7 @@ dev = [
 [project.scripts]
 fpga-agent = "fpga_agent.main:main"
 web-api = "web_api.main:main"
+fpga-video = "web_api.video_cli:main"
 
 [build-system]
 requires = ["hatchling"]

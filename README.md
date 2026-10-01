@@ -184,6 +184,7 @@ The HDMI capture demo also uses these Compose settings:
 | `DEMO_VIDEO_FPS` | `60` | Capture frame rate |
 | `DEMO_VIDEO_INPUT_FORMAT` | `mjpeg` | V4L2 pixel format passed through to browsers |
 | `DVD_LOGO_BITSTREAM` | `/app/demos/dvd-logo-video/bitstream/dvd_logo.bit` | Optional in-container bitstream override |
+| `WEB_API_VIDEO_ENABLE_FILE` | `/run/fpga-video-enabled` | Ephemeral marker controlling the standalone `/video` endpoint |
 
 Example:
 
@@ -278,9 +279,8 @@ The loader also accepts `DEMO` for older demo definitions, but new demos should 
 - runtime/program code under `programs/`
 
 `demos/dvd-logo-video/` provides an embedded live view of the FPGA HDMI
-output through a USB capture card. It uses FFmpeg to pass the capture card's
-MJPEG frames into a browser-compatible multipart MJPEG stream, avoiding a
-second video encode.
+output through a USB capture card. By default FFmpeg passes the card's MJPEG
+output into a browser-compatible multipart stream.
 
 The DVD logo bitstream is intentionally not included. Add it as:
 
@@ -291,6 +291,46 @@ demos/dvd-logo-video/bitstream/dvd_logo.bit
 Then restart `web-api`. The demo automatically programs that file when it is
 present; without it, the session skips programming and only starts the capture
 viewer. The source project is <https://github.com/ACrispyCookie/DVD-Logo-FPGA>.
+
+### Standalone video endpoint
+
+The web API also provides a disabled-by-default `/video` page for viewing the
+capture input without creating a queued demo session. Toggle it from inside the
+running container:
+
+```bash
+docker exec fpga-web-api fpga-video enable
+docker exec fpga-web-api fpga-video status
+docker exec fpga-web-api fpga-video disable
+```
+
+When enabled, open `/video`. All viewers share one FFmpeg capture process. With
+no queued HDMI demo active, capture starts on the first viewer and stops when the
+last viewer disconnects or the endpoint is disabled. The enable state is
+intentionally ephemeral and returns to disabled when the container is recreated.
+
+The standalone endpoint and queued HDMI demo share one capture producer, so
+both can be viewed at the same time. Disabling `/video` only closes standalone
+viewers; an active demo keeps its capture lease until the session ends. The
+producer stops once neither an enabled standalone viewer nor a demo needs it.
+
+On the deployed USB2 Video capture card, timed sessions have delivered identical
+black frames until roughly 12 seconds after demo activation. One YUYV/30-FPS
+trial displayed video within about one second, but two repeat YUYV trials took
+roughly 12 seconds too. MJPEG/30-FPS was also delayed. Thus changing format
+does **not** reliably fix the delay, and the FPGA signal/HDMI lock versus
+capture-card reacquisition is not yet isolated. For capture-card artifact
+diagnosis, compare the default MJPEG passthrough with uncompressed YUYV input:
+
+```env
+DEMO_VIDEO_INPUT_FORMAT=yuyv422
+DEMO_VIDEO_FPS=30
+```
+
+MJPEG passthrough minimizes CPU use but preserves any card-generated JPEG
+corruption. YUYV bypasses its JPEG encoder at higher USB bandwidth and local
+encoding cost. An all-black frame is reported as "No signal" on `/video`;
+this is an image-content heuristic, not a hardware HDMI-lock sensor.
 
 ## Troubleshooting
 
