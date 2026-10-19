@@ -174,6 +174,9 @@ The web API reads configuration from environment variables in `src/web_api/confi
 | `WEB_API_WS_PROTOCOL` | `fpga-demo.v1` | WebSocket subprotocol |
 | `WEB_API_SESSION_CONTENDED_SECONDS` | `300` | Active-session time window once someone is waiting |
 | `WEB_API_SESSION_HANDOFF_SECONDS` | `60` | Handoff/reset window between sessions |
+| `WEB_API_BOARD_LABEL` | unset | Friendly board name for the public status endpoints (falls back to the FPGA part) |
+| `WEB_API_PUBLIC_CORS_ORIGINS` | unset | Comma-separated origins allowed to read the public status endpoints, or `*` |
+| `WEB_API_PUBLIC_KEEPALIVE_SECONDS` | `15` | Keepalive comment interval on the public status stream |
 
 The HDMI capture demo also uses these Compose settings:
 
@@ -241,6 +244,42 @@ The browser sends commands such as:
 { "type": "session.create", "request_id": "...", "demo_id": "gpgpu-nbody" }
 { "type": "session.end", "request_id": "...", "session_id": "..." }
 ```
+
+## Public board status
+
+Two read-only endpoints let other sites (e.g. a portfolio) show the board's state. They need no cookie, never create an anonymous user, and expose only a public-safe summary: no device serial, JTAG context, bitstream ids, raw fault payloads, or user/session ids.
+
+```text
+GET /api/public/board          JSON snapshot (Cache-Control: max-age=10)
+GET /api/public/board/stream   Server-Sent Events: an `event: board` with the snapshot
+                               on connect and on every change, plus keepalive comments
+```
+
+```json
+{
+  "online": true,
+  "name": "Smart Zynq SL",
+  "fpga": "xc7z020",
+  "status": "idle",
+  "mode": "demo",
+  "temperature_c": 45.6,
+  "healthy": true,
+  "faults": [],
+  "active_demo": null,
+  "queue_length": 0,
+  "demos": [{ "id": "gpgpu-nbody", "name": "GPGPU n-body simulator" }],
+  "updated_at": "2026-10-19T12:47:25.526674+00:00"
+}
+```
+
+Cross-origin reads are allowed only for `WEB_API_PUBLIC_CORS_ORIGINS`. In the browser:
+
+```js
+const events = new EventSource("https://fpga.njason.dev/api/public/board/stream");
+events.addEventListener("board", (e) => render(JSON.parse(e.data)));
+```
+
+If a reverse proxy sits in front of the web API, make sure it doesn't buffer `text/event-stream` responses. The endpoint already sends `X-Accel-Buffering: no` and periodic keepalives.
 
 ## Adding a demo
 

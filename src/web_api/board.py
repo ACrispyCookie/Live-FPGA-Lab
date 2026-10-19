@@ -58,6 +58,8 @@ class BoardManager:
         self._disconnect_tasks: dict[str, asyncio.Task] = {}
 
         self._subscribers: dict[str, set[asyncio.Queue[dict[str, Any]]]] = {}
+        self._public_subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
+        self._last_public_snapshot: dict[str, Any] | None = None
 
     @property
     def available(self) -> bool:
@@ -101,6 +103,7 @@ class BoardManager:
             self._watch_task = None
 
         self._subscribers.clear()
+        self._public_subscribers.clear()
 
     async def demo_connection_opened(self, user_id: str, session_id: str) -> None:
         session = await self.sessions.get(session_id)
@@ -149,6 +152,62 @@ class BoardManager:
                 subscribers.discard(queue)
                 if not subscribers:
                     self._subscribers.pop(user_id, None)
+
+    def public_snapshot(self) -> dict[str, Any]:
+        """Anonymous, read-only board summary safe to show on other sites.
+
+        Leaves out device serials, JTAG context, bitstream ids, raw fault
+        payloads and anything that identifies users or sessions.
+        """
+        demos = [{"id": demo.id, "name": demo.name} for demo in self.demos.values()]
+        state = self.fpga_state
+        active = self.sessions.active
+
+        if state is None or not self.available:
+            return {
+                "online": False,
+                "name": self.config.board_label,
+                "fpga": state.target_ctx.fpga_name if state else None,
+                "status": FPGAStatus.OFFLINE.value,
+                "mode": None,
+                "temperature_c": None,
+                "healthy": False,
+                "faults": [],
+                "active_demo": None,
+                "queue_length": self.sessions.queue_length,
+                "demos": demos,
+                "updated_at": state.updated_at.isoformat() if state else None,
+            }
+
+        temperature = state.telemetry.temperature_c
+        return {
+            "online": True,
+            "name": self.config.board_label or state.target_ctx.fpga_name,
+            "fpga": state.target_ctx.fpga_name,
+            "status": state.status.value,
+            "mode": getattr(state.mode, "value", state.mode),
+            "temperature_c": round(temperature, 1) if temperature is not None else None,
+            "healthy": not state.faults,
+            "faults": sorted({fault.type.value for fault in state.faults}),
+            "active_demo": (
+                active.demo_id
+                if active and active.status in (SessionStatus.STARTING, SessionStatus.ACTIVE)
+                else None
+            ),
+            "queue_length": self.sessions.queue_length,
+            "demos": demos,
+            "updated_at": state.updated_at.isoformat(),
+        }
+
+    def open_public_subscription(self) -> asyncio.Queue[dict[str, Any]]:
+        """Queue that always holds the latest public snapshot (oldest dropped)."""
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=1)
+        queue.put_nowait(self.public_snapshot())
+        self._public_subscribers.add(queue)
+        return queue
+
+    def close_public_subscription(self, queue: asyncio.Queue[dict[str, Any]]) -> None:
+        self._public_subscribers.discard(queue)
 
     async def create_session(self, user_id: str, demo_id: str) -> DemoSession:
         if self.fpga_state and getattr(self.fpga_state, "mode", FPGAMode.DEMO) == FPGAMode.PROJECT:
@@ -705,6 +764,23 @@ class BoardManager:
     async def _broadcast(self, event: dict[str, Any]) -> None:
         for user_id in list(self._subscribers):
             await self._publish_user(user_id, event)
+        self._publish_public()
+
+    def _publish_public(self) -> None:
+        if not self._public_subscribers:
+            self._last_public_snapshot = None
+            return
+
+        snapshot = self.public_snapshot()
+        if snapshot == self._last_public_snapshot:
+            return
+        self._last_public_snapshot = snapshot
+
+        for queue in self._public_subscribers.copy():
+            if queue.full():
+                with suppress(asyncio.QueueEmpty):
+                    queue.get_nowait()
+            queue.put_nowait(snapshot)
 
     async def _publish_user(self, user_id: str, event: dict[str, Any]) -> None:
         for queue in self._subscribers.get(user_id, set()).copy():
