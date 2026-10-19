@@ -150,6 +150,7 @@ VIDEO_PAGE = """<!doctype html>
       }
     })();
     setInterval(inspectFrame, 500);
+    __PRESENCE_SCRIPT__
   </script>
 </body>
 </html>
@@ -158,11 +159,24 @@ VIDEO_PAGE = """<!doctype html>
 
 def render_video_page(*, stream_url: str = '/video/stream.mjpg',
                       offer_url: str = '/video/webrtc/offer',
-                      transport: str = 'webrtc') -> str:
+                      transport: str = 'webrtc',
+                      demo_presence: bool = False) -> str:
     """Reuse the responsive viewer inside a demo iframe or /video."""
+    presence_script = """
+    // WebRTC media bypasses the session HTTP proxy; keep the demo tab present.
+    function keepSessionAlive() {
+      fetch('health', { cache: 'no-store' }).catch(() => {});
+    }
+    keepSessionAlive();
+    setInterval(keepSessionAlive, 20000);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) keepSessionAlive();
+    });
+    """ if demo_presence else ''
     return (VIDEO_PAGE.replace('__STREAM_URL__', stream_url)
             .replace('__OFFER_URL__', offer_url)
-            .replace('__DEFAULT_TRANSPORT__', transport))
+            .replace('__DEFAULT_TRANSPORT__', transport)
+            .replace('__PRESENCE_SCRIPT__', presence_script))
 
 @dataclass(frozen=True)
 class VideoConfig:

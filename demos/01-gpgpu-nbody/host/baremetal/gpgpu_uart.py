@@ -336,6 +336,19 @@ class GpgpuUartMonitor:
         return output + output2
 
     def dump_dmem_bin(self, count: int, offset: int = 0) -> dict[int, str]:
+        if offset < 0 or count < 0 or offset > DEPTH or count > DEPTH - offset:
+            raise ValueError(f"DMEM dump range offset={offset} count={count} exceeds depth={DEPTH}")
+
+        # Pace the device-to-host stream. Large unbroken replies lose bytes on
+        # the CH340 USB/VM receive path; await each small reply's prompt before
+        # requesting more. The FPGA stays in dumping state for the whole read.
+        result: dict[int, str] = {}
+        for start in range(offset, offset + count, 8):
+            chunk_count = min(8, offset + count - start)
+            result.update(self._dump_dmem_bin_chunk(chunk_count, start))
+        return result
+
+    def _dump_dmem_bin_chunk(self, count: int, offset: int) -> dict[int, str]:
         self.write_line(f"dumpdmem_bin {offset} {count}")
         output, marker = self.read_until_bytes([b"BEGIN_DMEM_BIN\n", b"ERROR"], timeout=5.0)
         if marker == b"ERROR":

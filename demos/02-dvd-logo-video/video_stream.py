@@ -91,6 +91,7 @@ class Handler(BaseHTTPRequestHandler):
                 stream_url="stream.mjpg", offer_url="webrtc/offer",
                 transport=getattr(getattr(cast(CaptureServer, self.server).service, 'config', None),
                                   'transport', 'webrtc'),
+                demo_presence=True,
             ).encode())
         elif path == "/health":
             self._send_bytes("application/json", json.dumps({"status": "ok"}).encode())
