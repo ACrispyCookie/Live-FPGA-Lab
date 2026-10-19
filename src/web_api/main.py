@@ -59,6 +59,10 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 @app.middleware("http")
 async def anonymous_user(request: Request, call_next):
+    # Public read-only endpoints are embedded on other sites; don't mint lab users for them.
+    if request.url.path.startswith("/api/public/"):
+        return await call_next(request)
+
     user_id = request.cookies.get(config.user_cookie)
     created = user_id is None
 

@@ -23,6 +23,9 @@ class WebApiConfig:
     cookie_secure: bool = False
     cookie_samesite: str = "lax"
     ws_protocol: str = "fpga-demo.v1"
+    board_label: str | None = None
+    public_cors_origins: tuple[str, ...] = ()
+    public_keepalive_seconds: float = 15.0
     session: SessionConfig = SessionConfig()
 
     @classmethod
@@ -37,6 +40,12 @@ class WebApiConfig:
             cookie_secure=_env_bool("WEB_API_COOKIE_SECURE", cls.cookie_secure),
             cookie_samesite=os.environ.get("WEB_API_COOKIE_SAMESITE", cls.cookie_samesite),
             ws_protocol=os.environ.get("WEB_API_WS_PROTOCOL", cls.ws_protocol),
+            board_label=os.environ.get("WEB_API_BOARD_LABEL") or cls.board_label,
+            public_cors_origins=_env_list("WEB_API_PUBLIC_CORS_ORIGINS", cls.public_cors_origins),
+            public_keepalive_seconds=_env_float(
+                "WEB_API_PUBLIC_KEEPALIVE_SECONDS",
+                cls.public_keepalive_seconds,
+            ),
             session=SessionConfig(
                 contended_session_seconds=_env_int(
                     "WEB_API_SESSION_CONTENDED_SECONDS",
@@ -72,6 +81,13 @@ def _env_float(name: str, default: float) -> float:
         return float(raw)
     except ValueError as exc:
         raise ValueError(f"{name} must be a number") from exc
+
+
+def _env_list(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return tuple(item.strip() for item in raw.split(",") if item.strip())
 
 
 def _env_bool(name: str, default: bool) -> bool:

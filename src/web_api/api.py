@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from contextlib import suppress
 from pathlib import Path
@@ -8,7 +9,7 @@ from pathlib import Path
 import secrets
 import httpx
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
 from .board import BoardError, BoardManager
 from .config import WebApiConfig
@@ -39,6 +40,45 @@ def create_api(board: BoardManager, proxy_client: httpx.AsyncClient, *, config: 
             "status": "ok",
             "board": board.available,
         }
+
+    @router.get("/public/board")
+    async def public_board(request: Request):
+        return JSONResponse(
+            board.public_snapshot(),
+            headers={
+                "Cache-Control": "public, max-age=10",
+                **_public_cors_headers(request, config),
+            },
+        )
+
+    @router.get("/public/board/stream")
+    async def public_board_stream(request: Request):
+        queue = board.open_public_subscription()
+
+        async def events():
+            try:
+                yield "retry: 5000\n\n"
+                while True:
+                    try:
+                        snapshot = await asyncio.wait_for(queue.get(), config.public_keepalive_seconds)
+                    except asyncio.TimeoutError:
+                        if await request.is_disconnected():
+                            return
+                        yield ": keepalive\n\n"
+                        continue
+                    yield f"event: board\ndata: {json.dumps(snapshot, separators=(',', ':'))}\n\n"
+            finally:
+                board.close_public_subscription(queue)
+
+        return StreamingResponse(
+            events(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                **_public_cors_headers(request, config),
+            },
+        )
 
     @router.websocket("/ws")
     async def websocket(ws: WebSocket):
@@ -219,3 +259,15 @@ def _json(value):
     if hasattr(value, "model_dump"):
         return value.model_dump(mode="json")
     return value
+
+
+def _public_cors_headers(request: Request, config: WebApiConfig) -> dict[str, str]:
+    """Allow configured sites (e.g. a portfolio) to read the public board endpoints."""
+    origin = request.headers.get("origin")
+    allowed = config.public_cors_origins
+
+    if "*" in allowed:
+        return {"Access-Control-Allow-Origin": "*"}
+    if origin and origin in allowed:
+        return {"Access-Control-Allow-Origin": origin, "Vary": "Origin"}
+    return {"Vary": "Origin"} if allowed else {}
