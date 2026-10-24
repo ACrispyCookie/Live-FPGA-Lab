@@ -224,6 +224,10 @@ The frontend uses the queue state to show:
 - fault-aware ETA display when the board reports a fault/offline state
 - recent sessions that reached the board/programming path
 
+### Linking straight to a demo
+
+`https://fpga.njason.dev/?start=<demo id>` (for example `?start=gpgpu-nbody` or `?start=dvd-logo-video`) joins the queue for that demo as soon as the page connects, as if the visitor had pressed its **Start** button. It happens once per page load, and the parameter is then removed from the address, so a refresh doesn't join again. Nothing is started if the demo id is unknown, the visitor already has a session, or the board is reserved for projects; a message says why. The rule lives in `src/frontend/src/autostart.ts` and is tested with `npm test` in `src/frontend`.
+
 ## WebSocket messages
 
 The browser receives events such as:
