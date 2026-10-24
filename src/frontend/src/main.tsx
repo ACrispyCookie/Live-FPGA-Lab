@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
+import { autostart, withoutStart } from './autostart';
 
 type Board = {
   device_id?: string | null;
@@ -57,12 +58,14 @@ function App() {
   const [recentSessions, setRecentSessions] = useState<NonNullable<Session>[]>([]);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [nowTick, setNowTick] = useState(0);
+  const [ready, setReady] = useState(false); // the first state from the server has arrived
   const wsRef = useRef<WebSocket | null>(null);
   const demoFrameRef = useRef<HTMLIFrameElement | null>(null);
   const retryRef = useRef<number | undefined>(undefined);
   const toastTimersRef = useRef<Record<string, number>>({});
   const attemptsRef = useRef(0);
   const requestRef = useRef(0);
+  const autostartRef = useRef(false); // a ?start= link is acted on once per page load, not on every reconnect
 
   useEffect(() => {
     const timer = window.setInterval(() => setNowTick((n) => n + 1), 1000);
@@ -102,6 +105,7 @@ function App() {
           setQueue(msg.queue || { length: 0, position: null });
           setSession(msg.session);
           setRecentSessions(msg.recent_sessions || []);
+          setReady(true);
           return;
         }
         if (msg.type === 'board.updated') setBoard(msg.board);
@@ -137,6 +141,20 @@ function App() {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     ws.send(JSON.stringify({ type, request_id: `${Date.now()}-${++requestRef.current}`, ...payload }));
   }
+
+  // ?start=<demo id> (the portfolio's "Run the demo"): join the queue for that demo, as its Start button would, then
+  // drop the parameter so a refresh doesn't join again
+  useEffect(() => {
+    if (!ready || autostartRef.current) return;
+    autostartRef.current = true;
+    const next = autostart(location.search, { demos, hasSession: Boolean(session && session.status !== 'ended'), reserved: board?.mode === 'project' });
+    if (next.action === 'none') return;
+    history.replaceState(history.state, '', withoutStart(location.pathname + location.search, location.hash));
+    if (next.action === 'start') {
+      send('session.create', { demo_id: next.demo.id });
+      addToast(`Starting ${next.demo.name}. If the board is busy, you're in the queue.`, 'info');
+    } else addToast(next.message, 'warn');
+  }, [ready, demos, session, board]);
 
   function fullscreenDemo() {
     demoFrameRef.current?.requestFullscreen?.();
