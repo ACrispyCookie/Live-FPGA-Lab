@@ -147,7 +147,14 @@ foreach fpga $fpgas {{
 }}
 """.strip()
 
+SYSTEM_RESET_TCL = """
+targets -set -filter {target_ctx == "@@PROCESSOR_CTX@@"}
+rst -system
+after 500
+""".strip()
+
 PROGRAM_PL_TCL = """
+@@SYSTEM_RESET@@
 targets -set -filter {target_ctx == "@@FPGA_CTX@@"}
 fpga -file @@BITSTREAM@@
 puts {fpga-agent: programmed PL}
@@ -164,12 +171,7 @@ dow @@ELF@@
 puts {fpga-agent: programmed PS}
 """.strip()
 
-RESET_BOARD_TCL = """
-targets -set -filter {target_ctx == "@@PROCESSOR_CTX@@"}
-rst -system
-after 500
-puts {fpga-agent: reset complete}
-""".strip()
+RESET_BOARD_TCL = SYSTEM_RESET_TCL + "\nputs {fpga-agent: reset complete}"
 
 TELEMETRY_TCL = r"""
 proc emit_telemetry {payload} {
@@ -531,8 +533,14 @@ class BoardActions:
         bitstream_path, error = _require_file(bitstream, label="PL bitstream")
         if error:
             return error
+        # On a Zynq, reconfiguring the PL while its AXI masters have transfers in
+        # flight leaves those transfers in the PS HP ports, which only a system
+        # reset clears: the new design then reads stale data or locks up on its
+        # first access. Reset the PS first whenever the device has one.
+        processor_ctx = device_state.target_ctx.processor_ctx
         script = _render_template(
             PROGRAM_PL_TCL,
+            SYSTEM_RESET=_render_template(SYSTEM_RESET_TCL, PROCESSOR_CTX=processor_ctx) if processor_ctx else "",
             FPGA_CTX=device_state.target_ctx.fpga_ctx,
             BITSTREAM=_tcl_path(bitstream_path),
         )
