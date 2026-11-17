@@ -1,25 +1,25 @@
 # One slot for the visitor's session: design
 
-Status: draft for Jason's approval (2026-11-17). Builds on `2026-11-17-frontend-redesign-design.md` and `2026-11-17-responsive-and-attention-design.md`; their tokens, taste rules, copy rules and state model still hold.
+Status: approved by Jason (2026-11-17), with the footer taken off the trace and matched to the portfolio's. Builds on `2026-11-17-frontend-redesign-design.md` and `2026-11-17-responsive-and-attention-design.md`; their tokens, taste rules, copy rules and state model still hold.
 
 ## Intent
 
-Jason, after using the deployed lab: "Isn't it confusing that the session section moves up when it becomes active? And also the live stage of the session status is never actually reached since that becomes the active session when it goes live." And: "the footer has become a part of the copper traces but can never be reached."
+Jason, after using the deployed lab: "Isn't it confusing that the session section moves up when it becomes active? And also the live stage of the session status is never actually reached since that becomes the active session when it goes live." And: "the footer has become a part of the copper traces but can never be reached." Then, approving this design: "I don't think the footer should be a part of the trace at all. Match the footer of the portfolio."
 
 Three things break the sense of one continuous flow:
 
 1. **The session panel jumps when the demo goes live.** On a phone the session panel sits under the board, so Start takes the visitor down to it, but the stage then opens above the board. On desktop the narrow right-hand column suddenly becomes the full-width top of the page. The card the visitor was watching disappears and something new appears in another place. End jumps back.
 2. **The "Live" step is dead.** The stage replaces the panel at the instant the session goes live, so the third step is only ever shown in the rare case of an active session without a demo URL. Nobody sees it reached.
-3. **The footer pad never lights.** The trace draws down to a line 78 % of the way down the viewport. At the bottom of the page the footer sits at 87 to 91 % (measured at 1440 and 390), so its pad and stubs stay dark.
+3. **The footer is on the trace and its pad never lights.** The trace draws down to a line 78 % of the way down the viewport. At the bottom of the page the footer sits at 87 to 91 % (measured at 1440 and 390), so its pad stays dark. More to the point, the portfolio's footer isn't on the trace at all, so the lab's shouldn't be either.
 
-Success: from pressing Start to ending the session, the visitor's attention stays on one card that grows into the demo and shrinks back, its three steps all visibly complete, and the trace runs all the way to the footer.
+Success: from pressing Start to ending the session, the visitor's attention stays on one card that grows into the demo and shrinks back, and its three steps all visibly complete. The page ends the way njason.dev ends.
 
 ## Goals
 
 - The visitor's own panel holds a single place on the page from Start until the session's end message: the first slot of the hero.
 - The stage visibly grows out of that panel and shrinks back into it on End.
 - The "Live" step is reached on screen, inside the stage, while the demo page loads.
-- Scrolled to the bottom, the whole trace is drawn and every pad, including the footer's, is lit.
+- The footer matches the portfolio's and sits off the trace; scrolled to the bottom, the whole trace is drawn and every pad is lit.
 
 ## Non-goals
 
@@ -74,10 +74,28 @@ A pure `heroLayout(state): 'board-first' | 'session-first' | 'stage'` in `lab/de
 - Pure helper `stageSteps(state, frameLoaded): Step[]`: the result of `progressSteps(state)` with the last step `current` until the frame has loaded, then `done`.
 - The panel's own "active without a demo URL" case keeps showing Live as current, as today.
 
-### D. The trace reaches the footer
+### D. The footer, as on njason.dev
 
-- Root cause: `Trace.measure()` sets the drawn length to the point at 78 % of the viewport's height, and at maximum scroll the footer's pad sits below that line.
-- Fix: when the page is scrolled to within 2 px of its bottom, the target is the whole length (`total`), so the trace finishes drawing and every pad lights. Nothing else about the drawing changes.
+The portfolio's footer (read from the live site on 2026-11-17, `.foot` in `/_astro/Base.*.css`):
+
+- a full-bleed band in `--panel`, edge to edge of the viewport, at the very bottom of the page, after a section gap; top padding 36 px, bottom 28 px plus the safe-area inset;
+- an inner grid aligned with the content column, two columns (`minmax(0, 1fr) auto`, items aligned to the end, gap 18 px 24 px), one column on narrow screens with the links aligned to the start;
+- left: the name in bold display type at the lead size, with a dim line under it;
+- right: dim links that turn silk on hover, no underline, gap 8 px 18 px, wrapping;
+- a bottom row across both columns in small dim type: the copyright on the left, a build note on the right.
+
+The lab's footer is the same component with the lab's content:
+
+- **Name and line:** "Jason Nikas", then "Live FPGA Lab: a real board on the bench in my homelab."
+- **Links:** "Portfolio" (njason.dev), "Projects" (njason.dev/projects), "GitHub" (github.com/ACrispyCookie), "LinkedIn" (the same profile the portfolio links).
+- **Bottom row:** "© <current year> Jason Nikas" and "Source on GitHub" (the lab's repository, the only link in the row).
+
+It sits outside `<main>`, after the trace's wrapper, so the trace ends at the Recent sessions pad. Its inner grid uses the same width and left edge as the content column (`--page`, `--gutter`), so the name lines up with the section headings, the way the portfolio's lines up with its own. The body's bottom padding goes; the band meets the bottom edge. All strings live in `lab/copy.ts`.
+
+### E. The trace is drawn to its end at the bottom of the page
+
+- `Trace.measure()` sets the drawn length to the point at 78 % of the viewport's height. On a short last section, that point can stay above the last pad at maximum scroll (this is how the footer pad stayed dark).
+- Fix: when the page is scrolled to within 2 px of its bottom, the target is the whole length (`total`). Nothing else about the drawing changes.
 
 ## Tests and checks
 
@@ -86,6 +104,7 @@ A pure `heroLayout(state): 'board-first' | 'session-first' | 'stage'` in `lab/de
 - `check.py`:
   - per fixture, the hero's first element is the board (idle, busy, project, fault, offline), the session panel (requesting, queued, starting, ending, ended, failed) or the stage (active), and the hero holds exactly one `[data-pad]`;
   - at maximum scroll every `.t-pad` is lit, at 390, 1440 and 2560;
+  - the footer sits outside `.wrap`, spans the viewport's width (±1 px), carries no `data-pad`, and its inner block's left edge equals `main`'s left edge (±1 px);
   - the attention flow (Start from the bottom of the page) still finds the session panel in view and focused, now as the hero's first element.
 - `real_flow.py`: one real n-body session at 1440 and one at 390. Record the hero's first element at each change, and confirm the cover shows Live current before the frame loads and is gone after. Run only with the board idle and nobody queued.
 
