@@ -65,6 +65,17 @@ def check_layout(page: Page, name: str, width: int, failures: list[str]) -> None
             failures.append(f"{name}@{width}: the footer is {foot['width']:.0f}px wide, not the full {foot['vw']}px")
         if foot["inner"] is None or abs(foot["inner"]) > 1:
             failures.append(f"{name}@{width}: the footer's content is {foot['inner']}px off the content edge")
+    # the hero leads with the board until the visitor starts something, then with their session (or its stage)
+    lead = {"idle": "board", "busy": "board", "project": "board", "fault": "board", "offline": "board", "connecting": "board",
+            "error": "board", "longname": "board", "requesting": "session", "arrival": "session", "queued": "session",
+            "starting": "session", "ending": "session", "ended": "session", "failed": "session", "active": "stage", "reconnecting": "stage"}.get(name)
+    if lead:
+        hero = page.evaluate("""(() => { const h = document.querySelector('.hero'); if (!h) return null; const pads = [...h.querySelectorAll('[data-pad]')];
+          const first = h.firstElementChild; return { first: first ? first.className.split(' ')[0] : null, pads: pads.length, padInFirst: pads.length === 1 && first.contains(pads[0]) } })()""")
+        if not hero or hero["first"] != lead:
+            failures.append(f"{name}@{width}: the hero leads with {hero and hero['first']}, expected {lead}")
+        elif hero["pads"] != 1 or not hero["padInFirst"]:
+            failures.append(f"{name}@{width}: the hero has {hero['pads']} trace pad(s), expected one on its first element")
     # at the bottom of the page the whole trace is drawn
     page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
     page.wait_for_timeout(1500)

@@ -27,7 +27,7 @@ function Readout({ label, value, tone, detail, className = '', children }: { lab
   );
 }
 
-export function BoardPanel({ state, compact = false }: { state: LabState; compact?: boolean }) {
+export function BoardPanel({ state, compact = false, lead = false }: { state: LabState; compact?: boolean; lead?: boolean }) {
   const p = phase(state);
   const connecting = p === 'connecting';
   const b = state.board;
@@ -40,7 +40,7 @@ export function BoardPanel({ state, compact = false }: { state: LabState; compac
 
   return (
     <div className={`board${compact ? ' compact' : ''}`}>
-      <div className="band" data-pad>
+      <div className="band" data-pad={lead || undefined}>
         <span className="title"><Led on={online} blink={p === 'starting' || p === 'requesting'} ink />{copy.band}</span>
         <Pins />
       </div>

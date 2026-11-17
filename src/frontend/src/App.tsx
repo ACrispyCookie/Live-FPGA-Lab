@@ -12,7 +12,7 @@ import { TopBar } from './components/TopBar.tsx';
 import { Trace } from './components/Trace.tsx';
 import { mockState } from './dev/fixtures.ts';
 import { copy } from './lab/copy.ts';
-import { demoName, phase, tabTitle, timeLeft } from './lab/derive.ts';
+import { demoName, heroLayout, phase, tabTitle, timeLeft } from './lab/derive.ts';
 import { initialState, isLive, reduce } from './lab/reducer.ts';
 import { needsScroll } from './lab/scroll.ts';
 import { useLabSocket } from './lab/socket.ts';
@@ -123,7 +123,11 @@ export function App() {
     prevPhase.current = p;
   }, [p, revealSession]);
   const online = state.ready && state.socket === 'connected' && p !== 'offline';
-  const staged = p === 'active' && isLive(state.session) && Boolean(state.session.demo_url);
+  const layout = heroLayout(state);
+  const staged = layout === 'stage';
+  const sessionPanel = (lead: boolean) => (
+    <SessionPanel state={state} lead={lead} arrival={arrival} onCancel={onEnd} onEnd={onEnd} onRetry={onStart} headingRef={headingRef} flash={flash} onFlashEnd={() => setFlash(false)} />
+  );
 
   // The demo appears where the visitor is looking: when the stage arrives, the page scrolls to its top.
   useEffect(() => {
@@ -137,15 +141,20 @@ export function App() {
       <Toasts toasts={state.toasts} onDismiss={(id) => dispatch({ type: 'toast.dismissed', id })} />
       <TopBar state={state} sessionVisible={sessionVisible} />
       <div className="wrap" data-trace>
-        <Trace online={online} layoutKey={p === 'active' ? 'stage' : 'panel'} />
+        <Trace online={online} layoutKey={layout} />
         <main>
-          <section className={`hero${staged ? ' stage-first' : ''}`} id="session-hero" ref={heroRef} aria-label="The board and your session">
-            {staged ? <>
+          {/* One slot for the visitor: the board leads until they start something; from then on their session does, and
+              it becomes the stage while their demo is live. DOM order follows what is seen. */}
+          <section className={`hero lay-${layout}`} id="session-hero" ref={heroRef} aria-label="The board and your session">
+            {layout === 'stage' ? <>
               <Stage session={state.session!} demoName={demoName(state.demos, state.session!.demo_id)} timeLeft={timeLeft(state.session, state.now)} onEnd={onEnd} />
               <BoardPanel state={state} compact />
+            </> : layout === 'session-first' ? <>
+              {sessionPanel(true)}
+              <BoardPanel state={state} compact />
             </> : <>
-              <BoardPanel state={state} />
-              <SessionPanel state={state} arrival={arrival} onCancel={onEnd} onEnd={onEnd} onRetry={onStart} headingRef={headingRef} flash={flash} onFlashEnd={() => setFlash(false)} />
+              <BoardPanel state={state} lead />
+              {sessionPanel(false)}
             </>}
           </section>
           <section className="sec" id="demos">

@@ -106,7 +106,10 @@ main { position: relative; z-index: 1; display: grid; gap: var(--gap); padding-t
 .hero { display: flex; flex-wrap: wrap; gap: var(--gap-s); align-items: flex-start; min-width: 0; scroll-margin-top: calc(var(--bar) + 12px); container: hero / inline-size; }
 .hero > .board { flex: 2 1 30em; }
 .hero > .session { flex: 1 1 20em; }
-.hero.stage-first > * { flex-basis: 100%; }
+.hero.lay-stage > * { flex-basis: 100%; }
+/* the visitor's session leads with the larger share; the board steps back to its compact form */
+.hero.lay-session-first > .session { flex: 2 1 30em; }
+.hero.lay-session-first > .board { flex: 1 1 20em; }
 .board { background: var(--panel); border-radius: var(--r-xl); overflow: hidden; display: grid; grid-template-rows: auto 1fr; min-width: 0; container: board / inline-size; }
 .band { background: var(--cyan); color: var(--ink); padding: 11px 22px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .band .title { display: flex; align-items: center; gap: 10px; font-weight: 600; }
@@ -116,10 +119,12 @@ main { position: relative; z-index: 1; display: grid; gap: var(--gap); padding-t
 .what { color: var(--silk); }
 .readouts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 8em), 1fr)); gap: 10px; }
 /* a narrow board: the temperature and its sparkline get the full row under the other two */
-@container board (inline-size < 30em) { .ro.temp { grid-column: 1 / -1; order: 1; } }
+@container board (inline-size < 30em) { .readouts { grid-template-columns: repeat(2, minmax(0, 1fr)); } .ro.temp { grid-column: 1 / -1; order: 1; } }
+/* too narrow for two readouts side by side (a long status like Programming): one column */
+@container board (inline-size < 22em) { .readouts { grid-template-columns: minmax(0, 1fr); } }
 .ro { background: var(--raised); border-radius: var(--r-m); padding: 12px 14px; min-width: 0; display: grid; gap: 4px; align-content: start; }
 .ro small { color: var(--dim); font-size: var(--t-small); }
-.ro b { font: 700 var(--t-readout)/1.15 var(--font-display); overflow-wrap: anywhere; }
+.ro b { font: 700 var(--t-readout)/1.15 var(--font-display); overflow-wrap: break-word; }
 .ro.tone-cyan b { color: var(--cyan); }
 .ro.tone-amber b { color: var(--amber); }
 .ro.tone-dim b { color: var(--dim); font-weight: 500; }

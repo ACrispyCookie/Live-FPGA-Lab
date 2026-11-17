@@ -8,9 +8,9 @@ import { Skel } from './Skeleton.tsx';
 import { Steps } from './Steps.tsx';
 
 export type SessionHandlers = { onCancel: () => void; onEnd: () => void; onRetry: (demoId: string) => void };
-type PanelProps = { state: LabState; arrival: string | null; headingRef?: Ref<HTMLHeadingElement>; flash?: boolean; onFlashEnd?: () => void } & SessionHandlers;
+type PanelProps = { state: LabState; lead?: boolean; arrival: string | null; headingRef?: Ref<HTMLHeadingElement>; flash?: boolean; onFlashEnd?: () => void } & SessionHandlers;
 
-export function SessionPanel({ state, arrival, onCancel, onEnd, onRetry, headingRef, flash = false, onFlashEnd }: PanelProps) {
+export function SessionPanel({ state, lead = false, arrival, onCancel, onEnd, onRetry, headingRef, flash = false, onFlashEnd }: PanelProps) {
   const p = phase(state);
   const c = copy.session;
   const demoId = state.requesting?.demoId ?? state.session?.demo_id ?? state.lastEnded?.demo_id ?? '';
@@ -88,7 +88,7 @@ export function SessionPanel({ state, arrival, onCancel, onEnd, onRetry, heading
 
   if (!live && p === 'queued') live = queueSentence(state.queue);
   return (
-    <div className={`session${warn ? ' warn' : ''}${flash ? ' flash' : ''}`} onAnimationEnd={(e) => { if (e.animationName === 'ring') onFlashEnd?.(); }}>
+    <div className={`session${warn ? ' warn' : ''}${flash ? ' flash' : ''}`} data-pad={lead || undefined} onAnimationEnd={(e) => { if (e.animationName === 'ring') onFlashEnd?.(); }}>
       <h2 ref={headingRef} tabIndex={-1}>{c.heading}</h2>
       <p className="sr" aria-live="polite">{live}</p>
       <div className="phase" key={p}>{body}</div>

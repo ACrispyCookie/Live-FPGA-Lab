@@ -13,7 +13,7 @@ export function Stage({ session, demoName, timeLeft, onEnd }: { session: Session
   const url = session.demo_url || 'about:blank';
   return (
     <div className="stage" id="stage" data-kind={isInteractive(session.demo_id) ? 'interactive' : 'video'}>
-      <div className="sbar">
+      <div className="sbar" data-pad>
         <span className="who"><Led on />{demoName}</span>
         {timeLeft != null && <span className="left">{c.left(duration(timeLeft))}</span>}
         <div className="acts">
