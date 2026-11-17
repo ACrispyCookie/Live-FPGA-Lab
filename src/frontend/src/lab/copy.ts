@@ -31,7 +31,7 @@ export const copy = {
     opening: 'The board is ready. The demo is opening.',
     queued: { forDemo: 'For', eta: (t: string) => `Estimated start in ${t}. Each visitor gets 5 minutes once somebody is waiting.`, noEta: 'The current visitor has no time limit until someone waits, and you are next; your turn starts within about 6 minutes of now.', leave: 'Leave the queue' },
     starting: { head: (demo: string) => `Programming the board for ${demo}`, body: 'The bitstream is loading and the processor is booting. The demo appears here as soon as the board is ready.', cancel: 'Cancel' },
-    active: { left: (t: string) => `${t} left, someone is waiting`, fullscreen: 'Fullscreen', newTab: 'Open in a new tab', end: 'End session', loading: 'Loading the demo' },
+    active: { left: (t: string) => `${t} left, someone is waiting`, opening: 'Opening the demo.', fullscreen: 'Fullscreen', newTab: 'Open in a new tab', end: 'End session', loading: 'Loading the demo' },
     ending: { head: 'Ending', body: 'The board is resetting for the next visitor. You can start another demo in a moment.' },
     ended: { again: 'Start again' },
     project: { head: (what: string) => `In use for ${what}`, body: (what: string) => `The board is being used for ${what} right now. Demos reopen as soon as it's free; this page updates on its own.` },

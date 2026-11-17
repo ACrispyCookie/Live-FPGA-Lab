@@ -208,3 +208,21 @@ export function tabTitle(state: LabState): string {
     default: return t.base;
   }
 }
+
+export type HeroLayout = 'board-first' | 'session-first' | 'stage';
+
+/** What leads the hero: the board until the visitor starts something; from then on their session, which becomes the
+ *  stage while their demo is live and keeps the slot for the end message. */
+export function heroLayout(state: LabState): HeroLayout {
+  switch (phase(state)) {
+    case 'requesting': case 'queued': case 'starting': case 'ending': case 'ended': return 'session-first';
+    case 'active': return state.session?.demo_url ? 'stage' : 'session-first';
+    default: return 'board-first';
+  }
+}
+
+/** The stage's cover: the visitor's steps, with Live still current until the demo's page has loaded. */
+export function stageSteps(state: LabState, frameLoaded: boolean): Step[] {
+  const steps = progressSteps(state) ?? [];
+  return steps.map((s, i) => (i === steps.length - 1 ? { ...s, state: frameLoaded ? 'done' : 'current' } : s));
+}

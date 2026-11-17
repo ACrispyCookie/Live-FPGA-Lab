@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { initialState, reduce } from './reducer.ts';
 import {
-  boardStatus, demoKind, duration, endedSentence, ordinal, phase, pillText, progressSteps, queueEta, queueSentence, readAgo, recentOutcome, reservedFor, sparkPath, tabTitle, timeLeft,
+  boardStatus, demoKind, duration, endedSentence, heroLayout, ordinal, phase, pillText, progressSteps, stageSteps, queueEta, queueSentence, readAgo, recentOutcome, reservedFor, sparkPath, tabTitle, timeLeft,
 } from './derive.ts';
 import type { Board, LabState, Session } from './types.ts';
 
@@ -155,4 +155,23 @@ test('tab title mirrors the visitor own session only', () => {
   assert.equal(tabTitle(ready({ session: session({ status: 'queued' }), queue: { length: 2, position: 2 } })), '2nd in line');
   assert.equal(tabTitle(ready({ session: session({ status: 'active', demo_url: '/d' }) })), 'Your demo is live');
   assert.equal(tabTitle(ready({ lastEnded: session({ status: 'ended', end_reason: 'programming_failed' }) })), 'Live FPGA Lab');
+});
+
+test('the hero leads with the board until the visitor starts something', () => {
+  assert.equal(heroLayout(initialState), 'board-first');
+  assert.equal(heroLayout(ready()), 'board-first');
+  assert.equal(heroLayout(ready({}, board({ status: 'running' }))), 'board-first');
+  assert.equal(heroLayout(ready({}, board({ mode: 'project' }))), 'board-first');
+  assert.equal(heroLayout(ready({ requesting: { demoId: 'gpgpu-nbody', requestId: 'r' } })), 'session-first');
+  for (const status of ['queued', 'starting'] as const) assert.equal(heroLayout(ready({ session: session({ status }) })), 'session-first');
+  assert.equal(heroLayout(ready({ session: session({ status: 'active' }) })), 'session-first');
+  assert.equal(heroLayout(ready({ session: session({ status: 'active', demo_url: '/d' }) })), 'stage');
+  assert.equal(heroLayout(ready({ session: session({ status: 'active', demo_url: '/d' }), endRequested: true })), 'session-first');
+  assert.equal(heroLayout(ready({ lastEnded: session({ status: 'ended', end_reason: 'user_ended' }) })), 'session-first');
+});
+
+test('the stage reaches Live when its frame loads', () => {
+  const live = ready({ session: session({ status: 'active', demo_url: '/d' }) });
+  assert.deepEqual(stageSteps(live, false).map((s) => s.state), ['done', 'done', 'current']);
+  assert.deepEqual(stageSteps(live, true).map((s) => s.state), ['done', 'done', 'done']);
 });
