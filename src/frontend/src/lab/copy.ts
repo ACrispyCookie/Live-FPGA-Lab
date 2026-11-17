@@ -39,6 +39,8 @@ export const copy = {
     connecting: 'Connecting to the board',
     opened: { portfolio: 'Opened from njason.dev', link: 'Opened from a link' },
     errorFallback: 'Could not start the demo.',
+    steps: { requested: 'Requested', programming: 'Programming the board', live: 'Live' },
+    failed: { head: (d: string) => `Programming the board for ${d} failed`, retry: 'Try again' },
   },
   demos: {
     heading: 'Demos',
@@ -68,6 +70,7 @@ export const copy = {
     default: (d: string) => `Your ${d} session ended.`,
   } as Record<string, (d: string) => string>,
   endedReserved: (d: string, what: string) => `Your ${d} session ended: the board was needed for ${what}.`,
+  title: { base: 'Live FPGA Lab', programming: 'Programming the board', inLine: (place: string) => `${place} in line`, live: 'Your demo is live' },
   toast: { fallback: 'Update received.' },
   fallback: { needsJs: 'Live FPGA Lab: a real FPGA board in my homelab. This page needs JavaScript to connect to it.' },
 };

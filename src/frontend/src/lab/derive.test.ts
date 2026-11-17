@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { initialState, reduce } from './reducer.ts';
 import {
-  boardStatus, demoKind, duration, endedSentence, ordinal, phase, pillText, queueEta, queueSentence, readAgo, recentOutcome, reservedFor, sparkPath, timeLeft,
+  boardStatus, demoKind, duration, endedSentence, ordinal, phase, pillText, progressSteps, queueEta, queueSentence, readAgo, recentOutcome, reservedFor, sparkPath, tabTitle, timeLeft,
 } from './derive.ts';
 import type { Board, LabState, Session } from './types.ts';
 
@@ -131,4 +131,28 @@ test('pillText mirrors the session while its panel is off screen', () => {
   assert.deepEqual(pillText(queued, true), { text: 'Running', tone: 'cyan' });
   assert.deepEqual(pillText(ready({ session: session({ status: 'active', expires_at: iso(T0 + 252_000) }) }), false), { text: 'Running, 4m 12s left', tone: 'cyan' });
   assert.deepEqual(pillText(ready({ session: session({ status: 'starting' }) }), false), { text: 'Programming', tone: 'cyan' });
+});
+
+const steps = (s: LabState) => progressSteps(s)?.map((x) => x.state);
+
+test('progress steps follow the request', () => {
+  assert.equal(progressSteps(ready()), null);
+  assert.deepEqual(steps(ready({ requesting: { demoId: 'gpgpu-nbody', requestId: 'r' } })), ['current', 'ahead', 'ahead']);
+  assert.deepEqual(steps(ready({ session: session({ status: 'starting' }) })), ['done', 'current', 'ahead']);
+  assert.deepEqual(steps(ready({ session: session({ status: 'active' }) })), ['done', 'done', 'current']);
+  assert.deepEqual(steps(ready({ session: session({ status: 'active', demo_url: '/d' }) })), ['done', 'done', 'done']);
+  assert.equal(progressSteps(ready({ session: session({ status: 'queued' }) })), null);
+  assert.deepEqual(steps(ready({ lastEnded: session({ status: 'ended', end_reason: 'programming_failed' }) })), ['done', 'failed', 'ahead']);
+  assert.equal(progressSteps(ready({ lastEnded: session({ status: 'ended', end_reason: 'user_ended' }) })), null);
+  assert.deepEqual(progressSteps(ready({ session: session({ status: 'starting' }) }))?.map((x) => x.label), ['Requested', 'Programming the board', 'Live']);
+});
+
+test('tab title mirrors the visitor own session only', () => {
+  assert.equal(tabTitle(initialState), 'Live FPGA Lab');
+  assert.equal(tabTitle(ready()), 'Live FPGA Lab');
+  assert.equal(tabTitle(ready({ requesting: { demoId: 'gpgpu-nbody', requestId: 'r' } })), 'Programming the board');
+  assert.equal(tabTitle(ready({ session: session({ status: 'starting' }) })), 'Programming the board');
+  assert.equal(tabTitle(ready({ session: session({ status: 'queued' }), queue: { length: 2, position: 2 } })), '2nd in line');
+  assert.equal(tabTitle(ready({ session: session({ status: 'active', demo_url: '/d' }) })), 'Your demo is live');
+  assert.equal(tabTitle(ready({ lastEnded: session({ status: 'ended', end_reason: 'programming_failed' }) })), 'Live FPGA Lab');
 });

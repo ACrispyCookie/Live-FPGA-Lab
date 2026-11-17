@@ -176,3 +176,30 @@ export function pillText(state: LabState, sessionVisible: boolean): { text: stri
   const bs = boardStatus(state);
   return { text: bs.word, tone: bs.tone === 'silk' ? 'dim' : bs.tone };
 }
+
+export type StepState = 'done' | 'current' | 'ahead' | 'failed';
+export type Step = { key: 'requested' | 'programming' | 'live'; label: string; state: StepState };
+
+/** The three steps from pressing Start to the demo on screen, or null when the visitor has no request in flight. */
+export function progressSteps(state: LabState): Step[] | null {
+  const p = phase(state);
+  let states: [StepState, StepState, StepState];
+  if (p === 'requesting') states = ['current', 'ahead', 'ahead'];
+  else if (p === 'starting') states = ['done', 'current', 'ahead'];
+  else if (p === 'active') states = ['done', 'done', state.session?.demo_url ? 'done' : 'current'];
+  else if (p === 'ended' && state.lastEnded?.end_reason === 'programming_failed') states = ['done', 'failed', 'ahead'];
+  else return null;
+  const labels = copy.session.steps;
+  return (['requested', 'programming', 'live'] as const).map((key, i) => ({ key, label: labels[key], state: states[i] }));
+}
+
+/** The browser tab's title: the visitor's own state while their request is in flight, the site name otherwise. */
+export function tabTitle(state: LabState): string {
+  const t = copy.title;
+  switch (phase(state)) {
+    case 'requesting': case 'starting': return t.programming;
+    case 'queued': return t.inLine(ordinal(state.queue.position || 1));
+    case 'active': return t.live;
+    default: return t.base;
+  }
+}
