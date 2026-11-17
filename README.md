@@ -78,7 +78,17 @@ FPGA board + Xilinx tooling
   - Only one active/starting session can own the board.
 
 - `src/frontend/`
-  - Vite + React dashboard source.
+  - Vite + React dashboard source, in the circuit-board world of https://njason.dev.
+  - `public/tokens.css` holds the design tokens and the two self-hosted fonts (`public/fonts/`). It is served
+    as `/static/tokens.css` and linked by the embedded demo pages too, so the lab and the demos share one look.
+    It is a copy of the portfolio's `docs/DESIGN_SYSTEM.md`; change there first, then here.
+  - `src/lab/` is the pure core: `reducer.ts` (socket events and local actions to one state), `derive.ts`
+    (state to the words and numbers shown), `rows.ts`, `copy.ts` (every sentence a visitor reads).
+    `npm test` runs them with `node --test`; the Docker build runs the same tests as a gate.
+  - `src/components/` are thin: top bar, copper trace, board panel, session panel, stage, demo rows, recent sessions.
+  - `?mock=<state>` (idle, busy, queued, starting, active, ending, ended, project, fault, offline, …) replays a
+    fixture instead of the socket, only in builds made with `VITE_MOCK_STATES=1` (a Compose build argument).
+  - `checks/check.py` and `checks/real_flow.py` drive the deployed site with Python Playwright (see below).
   - Built assets are emitted into `src/web_api/static/` using `base: '/static/'`.
   - `emptyOutDir: false` keeps `debug.html` from being deleted during frontend builds.
 
@@ -287,6 +297,20 @@ events.addEventListener("board", (e) => render(JSON.parse(e.data)));
 
 If a reverse proxy sits in front of the web API, make sure it doesn't buffer `text/event-stream` responses. The endpoint already sends `X-Accel-Buffering: no` and periodic keepalives.
 
+## Frontend checks and deployment
+
+The workstation needs no Node: `scripts/deploy-vm2.sh` copies this checkout to the production host with tar over
+ssh and runs `docker compose build web-api && docker compose up -d web-api` there (`--no-build` only syncs).
+Set `VITE_MOCK_STATES=1` in the host's `.env` while reviewing the design; remove it for normal operation.
+
+Browser checks run from the workstation against the deployed site:
+
+```bash
+python3 -m venv .venv-checks && .venv-checks/bin/pip install playwright
+.venv-checks/bin/python src/frontend/checks/check.py --chrome /usr/bin/google-chrome-stable      # every state and width
+.venv-checks/bin/python src/frontend/checks/real_flow.py --chrome /usr/bin/google-chrome-stable  # one real session
+```
+
 ## Adding a demo
 
 Create a new immediate subdirectory under `demos/`:
@@ -303,11 +327,14 @@ DEMO_DEFINITION = {
     "id": "my-demo",
     "name": "My FPGA demo",
     "description": "Short user-facing description.",
+    "thumbnail": "thumbnail.svg",   # optional picture for the demo list (svg or png, 120×76 looks best)
     "bitstream": "bitstream/my_design.bit",
     "ps7_init_tcl": "boot/ps7_init.tcl",
     "elf": "boot/app.elf",
 }
 ```
+
+A thumbnail is served at `/api/demos/<id>/thumbnail`; without one the list shows a drawn placeholder.
 
 Path fields are resolved relative to the demo folder unless they are absolute paths.
 

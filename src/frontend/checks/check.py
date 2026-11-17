@@ -52,6 +52,18 @@ def check_layout(page: Page, name: str, width: int, failures: list[str]) -> None
         failures.append(f"{name}@{width}: trace only {gap:.0f}px from the content (need 28)")
 
 
+def _lum(rgb: str) -> float:
+    parts = [float(x) for x in rgb[rgb.index("(") + 1:rgb.index(")")].split(",")[:3]]
+    lin = [(c / 255 / 12.92) if c / 255 <= 0.03928 else (((c / 255) + 0.055) / 1.055) ** 2.4 for c in parts]
+    return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+
+
+def contrast(fg: str, bg: str) -> float:
+    a, b = _lum(fg), _lum(bg)
+    hi, lo = max(a, b), min(a, b)
+    return (hi + 0.05) / (lo + 0.05)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default="https://fpga.njason.dev")
@@ -83,6 +95,45 @@ def main() -> int:
                 ctx.close()
 
         if not args.no_mock and "idle" in fixtures:
+            # reduced motion: everything visible at once, trace fully drawn, no pulse
+            ctx = browser.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
+            page = ctx.new_page()
+            errors = []
+            page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
+            page.goto(f"{args.base}/?mock=idle", wait_until="networkidle")
+            page.wait_for_timeout(1500)
+            hidden = page.evaluate("[...document.querySelectorAll('.sec > :not(h2)')].filter((el) => getComputedStyle(el).opacity !== '1').length")
+            if hidden:
+                failures.append(f"reduced motion: {hidden} section children are not fully visible")
+            pads = page.evaluate("[...document.querySelectorAll('.t-pad')].filter((p) => !p.classList.contains('on')).length")
+            if pads:
+                failures.append(f"reduced motion: {pads} pads are not lit")
+            pulse = page.evaluate("getComputedStyle(document.querySelector('.t-pulse')).opacity")
+            if pulse != "0":
+                failures.append(f"reduced motion: the pulse is visible (opacity {pulse})")
+            failures.extend(f"reduced motion: {e}" for e in errors)
+            page.screenshot(path=str(OUT / "idle-1440-reduced-motion.png"), full_page=True)
+            ctx.close()
+
+            # contrast: a sample of the text styles on their real backgrounds, WCAG AA 4.5:1
+            ctx = browser.new_context(viewport={"width": 1440, "height": 900})
+            page = ctx.new_page()
+            page.goto(f"{args.base}/?mock=idle", wait_until="networkidle")
+            page.wait_for_timeout(800)
+            samples = page.evaluate(
+                """() => {
+                  const sel = ['.ro small', '.sec > .lead', '.tag', '.btn.live', '.ro.tone-cyan b', '.rec small', '.boardpill span', '.session .sub', '.demo p', '.topbar nav a', '.when'];
+                  const bg = (el) => { for (let e = el; e; e = e.parentElement) { const c = getComputedStyle(e).backgroundColor; if (c && c !== 'rgba(0, 0, 0, 0)' && c !== 'transparent') return c; } return 'rgb(11, 29, 33)'; };
+                  return sel.map((s) => { const el = document.querySelector(s); return el ? [s, getComputedStyle(el).color, bg(el)] : null; }).filter(Boolean);
+                }"""
+            )
+            for selector, fg, bgc in samples:
+                ratio = contrast(fg, bgc)
+                print(f"contrast {selector}: {ratio:.2f} ({fg} on {bgc})")
+                if ratio < 4.5:
+                    failures.append(f"contrast: {selector} is {ratio:.2f}:1 ({fg} on {bgc}), below 4.5")
+            ctx.close()
+
             ctx = browser.new_context(viewport={"width": 1440, "height": 900})
             page = ctx.new_page()
             errors = []

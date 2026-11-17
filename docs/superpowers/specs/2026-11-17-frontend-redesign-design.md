@@ -1,6 +1,6 @@
 # Live FPGA Lab frontend redesign
 
-Status: draft for Jason's approval (2026-11-17). Decisions marked **(Jason)** are his; everything else is the builder's call and can be corrected.
+Status: implemented on branch `feature/frontend-redesign` and deployed to vm2 (2026-11-17); approved by Jason with the nav order, skeleton and interaction-flow corrections. Decisions marked **(Jason)** are his; everything else is the builder's call and can be corrected.
 
 ## Intent
 
