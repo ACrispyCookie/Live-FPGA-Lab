@@ -23,10 +23,11 @@ VIDEO_PAGE = """<!doctype html>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>FPGA video output</title>
+  <link rel="stylesheet" href="/static/tokens.css" />
   <style>
-    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    :root { color-scheme: dark; }
     * { box-sizing: border-box; }
-    html, body { width: 100%; height: 100%; margin: 0; background: #05070a; }
+    html, body { width: 100%; height: 100%; margin: 0; background: var(--mask); color: var(--silk); font: 14px/1.4 var(--font-text); }
     body { position: relative; min-height: 100vh; min-height: 100dvh; overflow: hidden; }
     img, video { display: block; position: absolute; inset: 0; width: 100%; height: 100%;
       max-width: 100vw; max-height: 100vh; max-height: 100dvh; object-fit: contain; }
@@ -34,19 +35,17 @@ VIDEO_PAGE = """<!doctype html>
     .controls { position: absolute; z-index: 2; top: 14px; left: 14px;
       display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
     .badge { display: flex; align-items: center; gap: 8px;
-      padding: 7px 10px; border: 1px solid #30363d; border-radius: 999px;
-      background: rgb(13 17 23 / 82%); color: #e6edf3; font-size: 12px; }
-    .dot { width: 8px; height: 8px; border-radius: 50%; background: #d29922; }
-    body.has-signal .dot { background: #3fb950; box-shadow: 0 0 10px #3fb950; }
+      padding: 7px 12px; border-radius: 999px; background: var(--panel); color: var(--silk); font-size: 13px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--amber); }
+    body.has-signal .dot { background: var(--led); }
     .message { position: absolute; inset: 0; display: grid; place-content: center; gap: 8px;
-      text-align: center; padding: 24px; background: rgb(5 7 10 / 78%); color: #e6edf3; }
-    .message strong { font-size: clamp(22px, 4vw, 32px); }
-    .message span { font-size: 14px; color: #aab3bd; }
+      text-align: center; padding: 24px; background: var(--mask); color: var(--silk); }
+    .message strong { font: 700 clamp(22px, 4vw, 32px)/1.1 var(--font-display); letter-spacing: -.02em; }
+    .message span { font-size: 15px; color: var(--dim); }
     body.has-signal .message { display: none; }
-    .switch { color: #e6edf3;
-      border: 1px solid #30363d; border-radius: 999px; padding: 7px 12px;
-      background: rgb(13 17 23 / 82%); font-size: 12px; }
-    .switch select { color: inherit; background: #0d1117; border: 0; font: inherit; }
+    .switch { display: flex; align-items: center; gap: 8px; color: var(--dim);
+      border-radius: 999px; padding: 6px 8px 6px 12px; background: var(--panel); font-size: 13px; }
+    .switch select { color: var(--silk); background: var(--raised); border: 0; border-radius: 999px; padding: 4px 10px; font: inherit; }
     @media (max-width: 480px) { .controls { top: 10px; left: 10px; } }
   </style>
 </head>
