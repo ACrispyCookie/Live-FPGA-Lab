@@ -2,8 +2,8 @@
 /* registered so getComputedStyle hands the trace its resolved position in px, not the calc() */
 @property --trace-x { syntax: '<length>'; inherits: true; initial-value: 18.5px; }
 :root {
-  /* a demo card at its narrowest comfortable width: the thumbnail (10em), a short description's measure (34ch), the Start button (7em) */
-  --card: calc(10em + 34ch + 7em);
+  /* a demo card at its narrowest comfortable width: the thumbnail (9em), a short description's measure (28ch), the Start button (6em) */
+  --card: calc(15em + 28ch);
   --gap-s: clamp(.6rem, 1vw, .9rem);
   /* the page holds at most three demo cards side by side */
   --page: calc(3 * var(--card) + 2 * var(--gap-s));
@@ -93,7 +93,7 @@ main { position: relative; z-index: 1; display: grid; gap: var(--gap); padding-t
 .skel.pill { border-radius: 999px; }
 .rv .skel::after { content: ""; position: absolute; inset: 0; background: var(--hover); opacity: 0; animation: shimmer 1.6s ease-in-out infinite; }
 @keyframes shimmer { 50% { opacity: .55; } }
-.skel.ro { height: 120px; }
+.skel.ro { height: 7em; }
 .ident .skel + .skel { margin-top: 10px; }
 .demo.loading { pointer-events: none; }
 .demo.loading .text { gap: 10px; }
@@ -155,27 +155,41 @@ main { position: relative; z-index: 1; display: grid; gap: var(--gap); padding-t
 .sbar .left b { color: var(--silk); font-family: var(--font-display); font-size: 1.05rem; }
 .sbar .acts { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
 .frame { position: relative; background: #06181b; display: grid; }
-.frame iframe { width: 100%; height: 100%; min-height: 520px; border: 0; display: block; }
+.frame iframe { width: 100%; height: 100%; border: 0; display: block; }
 .frame .loading { position: absolute; inset: 0; display: grid; place-items: center; color: var(--dim); background: var(--panel); }
 .frame iframe:fullscreen { width: 100vw; height: 100vh; }
 
-/* demos: rows */
-.demolist { display: grid; gap: 10px; }
-@media (min-width: 1100px) { .demolist { grid-template-columns: 1fr 1fr; gap: 12px; } }
-.demo { display: grid; grid-template-columns: 112px minmax(0, 1fr) auto; gap: 16px; align-items: center; background: var(--panel); border-radius: var(--r-l); padding: 12px 16px 12px 12px; transition: background .2s; min-width: 0; }
+/* demos: cards that fill as many columns as fit at their natural width, and lay themselves out from the width they get */
+.demolist { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--card)), 1fr)); gap: var(--gap-s); }
+.demo { background: var(--panel); border-radius: var(--r-l); transition: background .2s; min-width: 0; container: demo / inline-size; }
 .demo:hover { background: var(--hover); }
 .demo.chosen { background: var(--lift); }
-.demo .thumb { aspect-ratio: 120 / 76; align-self: start; border-radius: var(--r-m); background: var(--raised); overflow: hidden; }
-.demo .thumb svg, .demo .thumb img { width: 100%; height: 100%; display: block; object-fit: cover; }
-.demo .text { display: grid; gap: 4px; min-width: 0; }
-.demo h3 { font-size: var(--t-lead); line-height: 1.2; }
+/* wide: the thumbnail carries a third of the card, Start sits at the right */
+.demo .in { display: grid; grid-template-columns: 32cqi minmax(0, 1fr) auto; grid-template-areas: "thumb text act" "thumb kind act"; grid-template-rows: auto auto; align-content: center; gap: .35rem 1rem; align-items: center; padding: .75rem 1rem .75rem .75rem; }
+.demo .thumb { grid-area: thumb; aspect-ratio: 120 / 76; border-radius: var(--r-m); background: var(--raised); overflow: hidden; }
+.demo .thumb svg, .demo .thumb img { width: 100%; height: 100%; display: block; object-fit: contain; }
+.demo .text { grid-area: text; align-self: end; display: grid; gap: 4px; min-width: 0; }
+.demo h3 { font-size: var(--t-lead); line-height: 1.2; overflow-wrap: break-word; }
 .demo p { color: var(--dim); }
-.demo .kind { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
-.demo .act { display: grid; justify-items: end; gap: 6px; }
-.demo .act small { color: var(--dim); font-size: var(--t-small); }
+.demo .kind { grid-area: kind; align-self: start; display: flex; gap: 8px; flex-wrap: wrap; }
+.demo .act { grid-area: act; display: grid; justify-items: end; gap: 6px; }
+.demo .act small { color: var(--dim); font-size: var(--t-small); text-align: right; }
+.demo.loading .thumb { align-self: stretch; }
+/* narrow (the card is under its own --card minimum, i.e. a single column on a small screen): a banner thumbnail on top,
+   then the text, then the tag and Start on one line. The query mirrors --card: 15em + 28ch. */
+@container demo (inline-size < calc(15em + 28ch)) {
+  .demo .in { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "thumb thumb" "text text" "kind act"; grid-template-rows: auto auto auto; padding: .6rem .6rem .9rem; gap: .7rem .75rem; }
+  .demo .thumb { aspect-ratio: 2 / 1; }
+  .demo .text { padding-inline: .35rem; }
+  .demo .kind { align-self: center; padding-left: .35rem; }
+  .demo .act { grid-auto-flow: column; align-items: center; gap: 10px; }
+  .demo h3 { font-size: clamp(1.1rem, 5cqi, var(--t-lead)); }
+  .demo p { font-size: var(--t-small); }
+}
 
 /* recent */
-.reclist { display: grid; gap: 8px; }
+/* two columns once two rows fit at a comfortable width (a name, its outcome and the time on one line) */
+.reclist { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 36em), 1fr)); gap: 8px; }
 .rec { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 14px; align-items: center; background: var(--panel); border-radius: var(--r-m); padding: 12px 18px 12px 16px; }
 .rec .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--copper); }
 .rec .dot.ok { background: var(--led); }
@@ -197,13 +211,10 @@ main { position: relative; z-index: 1; display: grid; gap: var(--gap); padding-t
 .toast-warn .toast-dot, .toast-error .toast-dot { background: var(--amber); }
 .toast-info .toast-dot { background: var(--cyan); }
 
-@media (max-width: 760px) {
-  .demo { grid-template-columns: 76px minmax(0, 1fr); gap: 10px 12px; padding: 12px; align-items: start; }
-  .demo .text { gap: 2px; }
-  .demo h3 { font-size: 1.15rem; }
-  .demo p { font-size: var(--t-small); }
-  .demo .act { grid-column: 2; justify-items: start; grid-auto-flow: column; align-items: center; gap: 12px; margin-top: 4px; }
-  .stage { min-height: calc(100vh - var(--bar) - 24px); border-radius: var(--r-l); }
+/* a narrow hero (a phone): the demo keeps a 4:3 frame so the bar and End session stay on screen, and the actions share a row */
+@container hero (inline-size < 40em) {
+  .stage { min-height: 0; border-radius: var(--r-l); }
+  .frame { aspect-ratio: 4 / 3; }
   .sbar { padding: 10px 12px; }
   .sbar .acts { margin-left: 0; width: 100%; }
   .sbar .acts .btn { flex: 1; }

@@ -31,15 +31,17 @@ export function DemoRow({ demo, state, onStart }: { demo: Demo; state: LabState;
   const chosen = kind === 'starting' || kind === 'queued' || kind === 'running';
   return (
     <article className={`demo${chosen ? ' chosen' : ''}`} data-demo={demo.id}>
-      <div className="thumb"><DemoThumb demo={demo} /></div>
-      <div className="text">
-        <h3>{demo.name}</h3>
-        {demo.description && <p>{demo.description}</p>}
+      <div className="in">
+        <div className="thumb"><DemoThumb demo={demo} /></div>
+        <div className="text">
+          <h3>{demo.name}</h3>
+          {demo.description && <p>{demo.description}</p>}
+        </div>
         <div className="kind"><span className="tag">{demoKind(demo)}</span></div>
-      </div>
-      <div className="act">
-        <button type="button" className={`btn${live ? ' live' : ''}`} disabled={!live} onClick={() => onStart(demo.id)}>{label(kind)}</button>
-        {note && <small>{note}</small>}
+        <div className="act">
+          <button type="button" className={`btn${live ? ' live' : ''}`} disabled={!live} onClick={() => onStart(demo.id)}>{label(kind)}</button>
+          {note && <small>{note}</small>}
+        </div>
       </div>
     </article>
   );
@@ -51,9 +53,12 @@ export function DemoList({ state, onStart }: { state: LabState; onStart: (demoId
       <div className="demolist">
         {Array.from({ length: 4 }, (_, i) => (
           <article key={i} className="demo loading" aria-hidden="true">
-            <div className="thumb" />
-            <div className="text"><Skel h={22} w="55%" pill /><Skel h={16} w="90%" pill /><Skel h={16} w="38%" pill /></div>
-            <div className="act"><Skel h={40} w={84} pill /></div>
+            <div className="in">
+              <div className="thumb" />
+              <div className="text"><Skel h={22} w="55%" pill /><Skel h={16} w="90%" pill /></div>
+              <div className="kind"><Skel h={22} w={120} pill /></div>
+              <div className="act"><Skel h={40} w={84} pill /></div>
+            </div>
           </article>
         ))}
       </div>
