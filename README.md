@@ -175,6 +175,7 @@ The web API reads configuration from environment variables in `src/web_api/confi
 | `WEB_API_SESSION_CONTENDED_SECONDS` | `300` | Active-session time window once someone is waiting |
 | `WEB_API_SESSION_HANDOFF_SECONDS` | `60` | Handoff/reset window between sessions |
 | `WEB_API_BOARD_LABEL` | unset | Friendly board name for the public status endpoints (falls back to the FPGA part) |
+| `WEB_API_RESERVED_FOR` | `owner projects` | What the board is being used for while its mode is `project`; visitors read "In use for <this>" |
 | `WEB_API_PUBLIC_CORS_ORIGINS` | unset | Comma-separated origins allowed to read the public status endpoints, or `*` |
 | `WEB_API_PUBLIC_KEEPALIVE_SECONDS` | `15` | Keepalive comment interval on the public status stream |
 
@@ -266,6 +267,7 @@ GET /api/public/board/stream   Server-Sent Events: an `event: board` with the sn
   "fpga": "xc7z020",
   "status": "idle",
   "mode": "demo",
+  "reserved_for": "GPGPU testing",
   "temperature_c": 45.6,
   "healthy": true,
   "faults": [],

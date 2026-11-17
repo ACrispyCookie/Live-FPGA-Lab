@@ -24,6 +24,7 @@ class WebApiConfig:
     cookie_samesite: str = "lax"
     ws_protocol: str = "fpga-demo.v1"
     board_label: str | None = None
+    reserved_for: str = "owner projects"  # what the board is used for while mode is "project"; shown to visitors
     public_cors_origins: tuple[str, ...] = ()
     public_keepalive_seconds: float = 15.0
     session: SessionConfig = SessionConfig()
@@ -41,6 +42,7 @@ class WebApiConfig:
             cookie_samesite=os.environ.get("WEB_API_COOKIE_SAMESITE", cls.cookie_samesite),
             ws_protocol=os.environ.get("WEB_API_WS_PROTOCOL", cls.ws_protocol),
             board_label=os.environ.get("WEB_API_BOARD_LABEL") or cls.board_label,
+            reserved_for=os.environ.get("WEB_API_RESERVED_FOR") or cls.reserved_for,
             public_cors_origins=_env_list("WEB_API_PUBLIC_CORS_ORIGINS", cls.public_cors_origins),
             public_keepalive_seconds=_env_float(
                 "WEB_API_PUBLIC_KEEPALIVE_SECONDS",
