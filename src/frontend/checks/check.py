@@ -55,7 +55,9 @@ def check_layout(page: Page, name: str, width: int, failures: list[str]) -> None
     # the footer, as on njason.dev: a full-width band off the trace, its content aligned with the page's column
     foot = page.evaluate("""(() => { const f = document.querySelector('.foot'), i = document.querySelector('.foot-in'), m = document.querySelector('main');
       if (!f || !m) return null; return { inWrap: !!f.closest('.wrap'), pad: f.hasAttribute('data-pad'), width: f.getBoundingClientRect().width,
-      vw: document.documentElement.clientWidth, inner: i && i.firstElementChild ? i.firstElementChild.getBoundingClientRect().left - m.getBoundingClientRect().left : null } })()""")
+      vw: document.documentElement.clientWidth, narrow: innerWidth <= 760, edge: parseFloat(getComputedStyle(f).paddingLeft),
+      left: i ? i.firstElementChild.getBoundingClientRect().left : null, right: i ? document.documentElement.clientWidth - i.querySelector('.links').getBoundingClientRect().right : null,
+      mainLeft: m.getBoundingClientRect().left + parseFloat(getComputedStyle(m).paddingLeft), mainRight: document.documentElement.clientWidth - m.getBoundingClientRect().right } })()""")
     if foot is None:
         failures.append(f"{name}@{width}: no footer")
     else:
@@ -63,8 +65,15 @@ def check_layout(page: Page, name: str, width: int, failures: list[str]) -> None
             failures.append(f"{name}@{width}: the footer is on the trace (inside .wrap: {foot['inWrap']}, data-pad: {foot['pad']})")
         if abs(foot["width"] - foot["vw"]) > 1:
             failures.append(f"{name}@{width}: the footer is {foot['width']:.0f}px wide, not the full {foot['vw']}px")
-        if foot["inner"] is None or abs(foot["inner"]) > 1:
-            failures.append(f"{name}@{width}: the footer's content is {foot['inner']}px off the content edge")
+        # as on njason.dev: a centred frame on wide screens (content on the page's column, equal margins), the page
+        # edge on phones
+        if foot["left"] is None:
+            failures.append(f"{name}@{width}: the footer has no content")
+        elif foot["narrow"]:
+            if abs(foot["left"] - foot["edge"]) > 1:
+                failures.append(f"{name}@{width}: the footer's content starts at {foot['left']:.0f}px, not the {foot['edge']:.0f}px page edge")
+        elif abs(foot["left"] - foot["mainLeft"]) > 1 or abs(foot["left"] - foot["right"]) > 1:
+            failures.append(f"{name}@{width}: the footer's content runs {foot['left']:.0f}px from the left and {foot['right']:.0f}px from the right (main column at {foot['mainLeft']:.0f}px); not centred")
     # the hero leads with the board until the visitor starts something, then with their session (or its stage)
     lead = {"idle": "board", "busy": "board", "project": "board", "fault": "board", "offline": "board", "connecting": "board",
             "error": "board", "longname": "board", "requesting": "session", "arrival": "session", "queued": "session",
