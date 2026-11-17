@@ -18,6 +18,7 @@ HTTP_PORT = os.environ.get("DEMO_HTTP_PORT")
 DEMO_DEFINITION = {
     "id": "dvd-logo-video",
     "name": "DVD Logo HDMI",
+    "thumbnail": "thumbnail.svg",
     "description": "Live HDMI output captured directly from the FPGA.",
     "bitstream": str(BITSTREAM) if BITSTREAM.is_file() else None,
 }

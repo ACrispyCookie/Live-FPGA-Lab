@@ -16,6 +16,7 @@ class DemoDefinition:
     bitstream: Path | None = None
     ps7_init_tcl: Path | None = None
     elf: Path | None = None
+    thumbnail: Path | None = None  # optional picture for the demo list (svg or png), relative to the demo folder
     start_session: Any = None
     stop_session: Any = None
 
@@ -61,6 +62,7 @@ def _load_definition(path: Path) -> DemoDefinition:
         bitstream=_optional_path(raw, "bitstream", root),
         ps7_init_tcl=_optional_path(raw, "ps7_init_tcl", root),
         elf=_optional_path(raw, "elf", root),
+        thumbnail=_optional_path(raw, "thumbnail", root),
         start_session=getattr(module, "start_session", None),
         stop_session=getattr(module, "stop_session", None),
     )

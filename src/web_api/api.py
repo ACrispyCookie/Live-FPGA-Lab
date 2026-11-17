@@ -80,6 +80,15 @@ def create_api(board: BoardManager, proxy_client: httpx.AsyncClient, *, config: 
             },
         )
 
+    @router.get("/demos/{demo_id}/thumbnail")
+    async def demo_thumbnail(demo_id: str):
+        """A demo's picture for the demo list, when its folder ships one."""
+        demo = board.demos.get(demo_id)
+        path = getattr(demo, "thumbnail", None) if demo else None
+        if path is None or not Path(path).is_file():
+            raise HTTPException(404, "No thumbnail for this demo.")
+        return FileResponse(path, headers={"Cache-Control": "public, max-age=86400"})
+
     @router.websocket("/ws")
     async def websocket(ws: WebSocket):
         user_id = ws.cookies.get(config.user_cookie)

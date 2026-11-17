@@ -12,6 +12,7 @@ from typing import Any
 DEMO_DEFINITION = {
     "id": "gpgpu-nbody",
     "name": "GPGPU n-body simulator",
+    "thumbnail": "thumbnail.svg",
     "description": "Interactive n-body simulation running on the FPGA.",
     "bitstream": "bitstream/gpgpu_system_hello.bit",
     "ps7_init_tcl": "boot/ps7_init.tcl",

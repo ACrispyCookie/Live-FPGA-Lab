@@ -13,6 +13,7 @@ from typing import Any
 DEMO_DEFINITION = {
     "id": "gpgpu-triangle",
     "name": "GPGPU triangle",
+    "thumbnail": "thumbnail.svg",
     "description": "The GPGPU rasterizes one triangle into the framebuffer, shown live over HDMI.",
     "bitstream": "bitstream/gpgpu_platform.bit",
     "ps7_init_tcl": "boot/ps7_init.tcl",

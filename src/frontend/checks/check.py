@@ -25,6 +25,13 @@ def open_page(page: Page, url: str, errors: list[str]) -> None:
     page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
     page.goto(url, wait_until="networkidle")
     page.wait_for_timeout(1200)
+    # the sections switch on as the trace reaches them: scroll through the page so a full-page capture shows everything
+    height = page.evaluate("document.documentElement.scrollHeight")
+    for y in range(0, height + 600, 500):
+        page.evaluate(f"window.scrollTo(0, {y})")
+        page.wait_for_timeout(120)
+    page.evaluate("window.scrollTo(0, 0)")
+    page.wait_for_timeout(600)
 
 
 def check_layout(page: Page, name: str, width: int, failures: list[str]) -> None:
@@ -80,7 +87,6 @@ def main() -> int:
             page = ctx.new_page()
             errors = []
             open_page(page, f"{args.base}/?mock=idle", errors)
-            page.evaluate("window.__labSends = []; const o = WebSocket.prototype.send; WebSocket.prototype.send = function(d){ window.__labSends.push(d); return o.call(this, d); }")
             first = page.locator(".demo button.btn").first
             first.click()
             page.wait_for_timeout(50)
@@ -94,8 +100,10 @@ def main() -> int:
                 failures.append("flow: another demo's Start is still enabled while requesting")
             first.dblclick(force=True)
             page.wait_for_timeout(50)
-            sends = page.evaluate("window.__labSends.length")
-            print(f"flow: headline='{head.strip()}' sends={sends}")
+            sends = page.evaluate("(window.__labDispatches || []).filter((t) => t === 'start.requested').length")
+            print(f"flow: headline='{head.strip()}' start requests={sends}")
+            if sends != 1:
+                failures.append(f"flow: {sends} start requests were dispatched for one click and one double click, expected 1")
             failures.extend(f"flow: {e}" for e in errors)
             page.screenshot(path=str(OUT / "flow-after-start.png"), full_page=True)
             ctx.close()

@@ -5,12 +5,13 @@ import { BoardPanel } from './components/BoardPanel.tsx';
 import { DemoList } from './components/DemoList.tsx';
 import { RecentSessions } from './components/RecentSessions.tsx';
 import { SessionPanel } from './components/SessionPanel.tsx';
+import { Stage } from './components/Stage.tsx';
 import { Toasts } from './components/Toasts.tsx';
 import { TopBar } from './components/TopBar.tsx';
 import { Trace } from './components/Trace.tsx';
 import { mockState } from './dev/fixtures.ts';
 import { copy } from './lab/copy.ts';
-import { phase } from './lab/derive.ts';
+import { demoName, phase, timeLeft } from './lab/derive.ts';
 import { initialState, isLive, reduce } from './lab/reducer.ts';
 import { useLabSocket } from './lab/socket.ts';
 import type { Action, LabState } from './lab/types.ts';
@@ -18,6 +19,9 @@ import type { Action, LabState } from './lab/types.ts';
 const TOAST_TTL_MS = 5200;
 const PHONE = '(max-width: 760px)';
 const reducer = (state: LabState, action: Action) => reduce(state, action, Date.now());
+const MOCK = import.meta.env.VITE_MOCK_STATES === '1';
+
+declare global { interface Window { __labDispatches?: string[] } }
 
 function arrivalNote(): string | null {
   try {
@@ -69,6 +73,7 @@ export function App() {
   const onStart = useCallback((demoId: string) => {
     if (state.requesting || isLive(state.session)) return;
     const requestId = send('session.create', { demo_id: demoId });
+    if (MOCK) (window.__labDispatches ||= []).push('start.requested');
     dispatch({ type: 'start.requested', demoId, requestId });
     scrollToSession();
   }, [send, state.requesting, state.session, scrollToSession]);
@@ -94,6 +99,14 @@ export function App() {
 
   const p = phase(state);
   const online = state.ready && state.socket === 'connected' && p !== 'offline';
+  const staged = p === 'active' && isLive(state.session) && Boolean(state.session.demo_url);
+
+  // The demo appears where the visitor is looking: when the stage arrives, the page scrolls to its top.
+  useEffect(() => {
+    if (!staged) return;
+    const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    heroRef.current?.scrollIntoView({ block: 'start', behavior: reduce ? 'auto' : 'smooth' });
+  }, [staged]);
 
   return (
     <>
@@ -102,9 +115,14 @@ export function App() {
       <div className="wrap" data-trace>
         <Trace online={online} layoutKey={p === 'active' ? 'stage' : 'panel'} />
         <main>
-          <section className="hero" id="session-hero" ref={heroRef} aria-label="The board and your session">
-            <BoardPanel state={state} />
-            <SessionPanel state={state} arrival={arrival} onCancel={onEnd} onEnd={onEnd} />
+          <section className={`hero${staged ? ' stage-first' : ''}`} id="session-hero" ref={heroRef} aria-label="The board and your session">
+            {staged ? <>
+              <Stage session={state.session!} demoName={demoName(state.demos, state.session!.demo_id)} timeLeft={timeLeft(state.session, state.now)} onEnd={onEnd} />
+              <BoardPanel state={state} compact />
+            </> : <>
+              <BoardPanel state={state} />
+              <SessionPanel state={state} arrival={arrival} onCancel={onEnd} onEnd={onEnd} />
+            </>}
           </section>
           <section className="sec" id="demos">
             <h2 data-pad>{copy.demos.heading}</h2>
