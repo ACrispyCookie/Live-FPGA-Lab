@@ -46,7 +46,19 @@ VIDEO_PAGE = """<!doctype html>
     .switch { display: flex; align-items: center; gap: 8px; color: var(--dim);
       border-radius: 999px; padding: 6px 8px 6px 12px; background: var(--panel); font-size: 13px; }
     .switch select { color: var(--silk); background: var(--raised); border: 0; border-radius: 999px; padding: 4px 10px; font: inherit; }
-    @media (max-width: 480px) { .controls { top: 10px; left: 10px; } }
+    /* once the picture is there the controls step aside, and come back on hover, a tap or keyboard focus */
+    .controls { transition: opacity .3s ease; }
+    body.has-signal .controls { opacity: 0; transition: opacity .6s ease 2.5s; }
+    body.has-signal:hover .controls, body.has-signal:active .controls, .controls:focus-within { opacity: 1; transition-delay: 0s; }
+    /* a small frame (a phone): compact controls, and the waiting message sits below them */
+    @media (max-width: 480px) {
+      .controls { top: 8px; left: 8px; gap: 6px; }
+      .badge, .switch { font-size: 12px; padding-block: 5px; }
+      .message { padding: 76px 16px 12px; place-content: start center; }
+      .message strong { font-size: 18px; }
+      .message span { font-size: 13px; }
+    }
+    @media (prefers-reduced-motion: reduce) { .controls { transition: none !important; } }
   </style>
 </head>
 <body>
