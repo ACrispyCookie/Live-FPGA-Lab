@@ -151,10 +151,10 @@ main { position: relative; z-index: 1; display: grid; gap: var(--gap); padding-t
 .session .btn { justify-self: start; }
 /* the request in flight: the chosen demo, its steps on a short trace, one sentence on what happens now */
 .session h2:focus { outline: none; }
-.session .pick { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.session .pthumb { flex: none; width: 4.5em; aspect-ratio: 120 / 76; border-radius: 10px; overflow: hidden; background: var(--raised); }
-.session .pthumb img, .session .pthumb svg { width: 100%; height: 100%; display: block; object-fit: contain; }
-.session .pick b { font: 700 var(--t-lead)/1.2 var(--font-display); color: var(--cyan); overflow-wrap: break-word; min-width: 0; }
+.progress .pick { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.progress .pthumb { flex: none; width: 4.5em; aspect-ratio: 120 / 76; border-radius: 10px; overflow: hidden; background: var(--raised); }
+.progress .pthumb img, .progress .pthumb svg { width: 100%; height: 100%; display: block; object-fit: contain; }
+.progress .pick b { font: 700 var(--t-lead)/1.2 var(--font-display); color: var(--cyan); overflow-wrap: break-word; min-width: 0; }
 .steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; position: relative; }
 .steps::before { content: ""; position: absolute; left: 5px; top: .8em; bottom: .8em; width: 2px; background: var(--hover); }
 .steps li { position: relative; display: flex; align-items: center; gap: 14px; color: var(--dim); }
@@ -166,7 +166,7 @@ main { position: relative; z-index: 1; display: grid; gap: var(--gap); padding-t
 .rv .steps li[data-state="current"] .sl { animation: breathe 1s ease-in-out infinite; }
 .steps li[data-state="failed"] { color: var(--silk); font-weight: 600; }
 .steps li[data-state="failed"] .sl { background: var(--fault); }
-.session .now { color: var(--dim); }
+.progress .now { color: var(--dim); }
 .sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 /* one cyan ring when the visitor's own action changes the panel; it answers the click, then gets out of the way */
 .rv .session.flash { animation: ring 1.2s cubic-bezier(.16, 1, .3, 1); }
@@ -187,7 +187,11 @@ main { position: relative; z-index: 1; display: grid; gap: var(--gap); padding-t
 .sbar .btn:not(.p):hover { background: var(--lift); }
 .frame { position: relative; background: #06181b; display: grid; }
 .frame iframe { width: 100%; height: 100%; border: 0; display: block; }
-.frame .loading { position: absolute; inset: 0; display: grid; place-items: center; color: var(--dim); background: var(--panel); }
+/* the progress card over the demo while it loads; it fades once Live is reached */
+.progress { display: grid; gap: 16px; }
+.cover { position: absolute; inset: 0; display: grid; place-items: center; padding: 1.5rem; background: var(--panel); transition: opacity .3s ease; }
+.cover .progress { width: min(100%, 26rem); }
+.cover.out { opacity: 0; }
 .frame iframe:fullscreen { width: 100vw; height: 100vh; }
 
 /* demos: cards that fill as many columns as fit. Each card spans four rows of the list (thumbnail, name, description,
@@ -250,4 +254,10 @@ main { position: relative; z-index: 1; display: grid; gap: var(--gap); padding-t
   .sbar .acts { margin-left: 0; width: 100%; }
   .sbar .acts .btn { flex: 1; }
 }
+/* the visitor's card keeps one identity as it moves to the front, grows into the stage and shrinks back */
+.session, .stage { view-transition-name: visitor; }
+.board { view-transition-name: board; }
+.progress { view-transition-name: progress; }
+::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation-duration: .38s; animation-timing-function: cubic-bezier(.16, 1, .3, 1); }
+
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }

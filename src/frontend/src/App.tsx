@@ -16,6 +16,7 @@ import { demoName, heroLayout, phase, tabTitle, timeLeft } from './lab/derive.ts
 import { initialState, isLive, reduce } from './lab/reducer.ts';
 import { needsScroll } from './lab/scroll.ts';
 import { useLabSocket } from './lab/socket.ts';
+import { useLayoutTransitionDispatch } from './lab/useLayoutTransitionDispatch.ts';
 import type { Action, LabState } from './lab/types.ts';
 
 const TOAST_TTL_MS = 5200;
@@ -37,9 +38,15 @@ function arrivalNote(): string | null {
 
 export function App() {
   const [mock] = useState(() => mockState());
-  const [state, dispatch] = useReducer(reducer, mock ?? initialState);
-  const { send } = useLabSocket(dispatch, !mock);
+  const [state, rawDispatch] = useReducer(reducer, mock ?? initialState);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const getState = useCallback(() => stateRef.current, []);
+  // actions that rearrange the hero animate it; the rest (and ticks, toasts) dispatch as they are
   const heroRef = useRef<HTMLElement>(null);
+  const heroVisible = useCallback(() => { const r = heroRef.current?.getBoundingClientRect(); return !!r && r.bottom > 0 && r.top < innerHeight; }, []);
+  const { dispatch, settled } = useLayoutTransitionDispatch(rawDispatch, getState, heroVisible);
+  const { send } = useLabSocket(dispatch, !mock);
   const [sessionVisible, setSessionVisible] = useState(true);
   const [arrival, setArrival] = useState<string | null>(null);
   const autostartRef = useRef(false);
@@ -70,7 +77,7 @@ export function App() {
   // Take the visitor to their session panel: scroll only if it isn't fully in view under the bar, then move focus
   // to it and ring it once. Runs after the render, so the panel is measured in its new state.
   const revealSession = useCallback(() => {
-    requestAnimationFrame(() => {
+    settled().then(() => requestAnimationFrame(() => {
       const panel = heroRef.current?.querySelector<HTMLElement>('.session');
       if (!panel) return;
       const bar = document.querySelector('.topbar')?.getBoundingClientRect().height ?? 0;
@@ -82,8 +89,8 @@ export function App() {
       headingRef.current?.focus({ preventScroll: true });
       setFlash(false);
       requestAnimationFrame(() => setFlash(true));
-    });
-  }, []);
+    }));
+  }, [settled]);
 
   const onStart = useCallback((demoId: string) => {
     if (state.requesting || isLive(state.session)) return;
@@ -133,8 +140,8 @@ export function App() {
   useEffect(() => {
     if (!staged) return;
     const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
-    heroRef.current?.scrollIntoView({ block: 'start', behavior: reduce ? 'auto' : 'smooth' });
-  }, [staged]);
+    settled().then(() => heroRef.current?.scrollIntoView({ block: 'start', behavior: reduce ? 'auto' : 'smooth' }));
+  }, [staged, settled]);
 
   return (
     <>
@@ -147,7 +154,7 @@ export function App() {
               it becomes the stage while their demo is live. DOM order follows what is seen. */}
           <section className={`hero lay-${layout}`} id="session-hero" ref={heroRef} aria-label="The board and your session">
             {layout === 'stage' ? <>
-              <Stage session={state.session!} demoName={demoName(state.demos, state.session!.demo_id)} timeLeft={timeLeft(state.session, state.now)} onEnd={onEnd} />
+              <Stage state={state} session={state.session!} demoName={demoName(state.demos, state.session!.demo_id)} timeLeft={timeLeft(state.session, state.now)} onEnd={onEnd} />
               <BoardPanel state={state} compact />
             </> : layout === 'session-first' ? <>
               {sessionPanel(true)}

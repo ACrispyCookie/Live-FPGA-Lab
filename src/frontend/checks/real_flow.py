@@ -87,8 +87,8 @@ def main() -> int:
         else:
             page.wait_for_timeout(args.run_seconds * 1000)
             frame_url = page.evaluate("(document.querySelector('.stage iframe') || {}).src || ''")
-            loading = page.locator(".stage .loading").count()
-            log(f"stage: iframe='{frame_url}' loading-overlay={loading} bar='{page.locator('.sbar').text_content()}'", page)
+            loading = page.locator(".stage .cover").count()
+            log(f"stage: iframe='{frame_url}' cover={loading} bar='{page.locator('.sbar').text_content()}'", page)
             page.locator(".sbar button", has_text="End session").click()
             page.wait_for_timeout(80)
             log(f"clicked End: headline='{headline(page)}'", page)

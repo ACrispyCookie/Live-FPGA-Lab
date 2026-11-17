@@ -29,12 +29,14 @@ export function SessionPanel({ state, lead = false, arrival, onCancel, onEnd, on
       : c.opening;
     live = failed ? c.failed.head(demo) : steps.find((s) => s.state === 'current')?.label ?? '';
     body = <>
-      <div className="pick">
-        <span className="pthumb"><DemoThumb demo={state.demos.find((d) => d.id === demoId) ?? { id: demoId, name: demo }} /></span>
-        <b>{demo}</b>
+      <div className="progress">
+        <div className="pick">
+          <span className="pthumb"><DemoThumb demo={state.demos.find((d) => d.id === demoId) ?? { id: demoId, name: demo }} /></span>
+          <b>{demo}</b>
+        </div>
+        <Steps steps={steps} />
+        <p className="now">{now}</p>
       </div>
-      <Steps steps={steps} />
-      <p className="now">{now}</p>
       {p === 'starting' && <div className="row"><button type="button" className="btn" onClick={onCancel}>{c.starting.cancel}</button></div>}
       {failed && <div className="row"><button type="button" className="btn live" onClick={() => onRetry(demoId)}>{c.failed.retry}</button><a className="btn" href="#demos">{c.busy.cta}</a></div>}
     </>;

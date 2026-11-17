@@ -261,6 +261,26 @@ def main() -> int:
                 failures.append("attention@1440: focus is not on the session heading when no scroll was needed")
             ctx.close()
 
+        if not args.no_mock and "active" in fixtures:
+            # the stage opens under the progress card, which reaches Live and gets out of the way once the demo loads
+            for width in (1440, 390):
+                ctx = browser.new_context(viewport={"width": width, "height": 900})
+                page = ctx.new_page()
+                page.goto(f"{args.base}/?mock=active", wait_until="domcontentloaded")
+                seen = False
+                for _ in range(40):
+                    if page.evaluate("!!document.querySelector('.stage .cover')"):
+                        seen = True
+                        break
+                    page.wait_for_timeout(50)
+                page.wait_for_timeout(2000)
+                left = page.evaluate("!!document.querySelector('.stage .cover')")
+                if not seen:
+                    failures.append(f"cover@{width}: the stage opened without its progress cover")
+                if left:
+                    failures.append(f"cover@{width}: the cover is still over the demo 2 s after it loaded")
+                ctx.close()
+
         if not args.no_mock and "failed" in fixtures:
             ctx = browser.new_context(viewport={"width": 1440, "height": 900})
             page = ctx.new_page()
