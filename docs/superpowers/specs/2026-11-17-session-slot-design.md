@@ -1,6 +1,6 @@
 # One slot for the visitor's session: design
 
-Status: approved by Jason (2026-11-17), with the footer taken off the trace and matched to the portfolio's. Builds on `2026-11-17-frontend-redesign-design.md` and `2026-11-17-responsive-and-attention-design.md`; their tokens, taste rules, copy rules and state model still hold.
+Status: implemented on branch feature/frontend-redesign and deployed to vm2 (2026-11-17). Approved by Jason with the footer taken off the trace and matched to the portfolio's. Builds on `2026-11-17-frontend-redesign-design.md` and `2026-11-17-responsive-and-attention-design.md`; their tokens, taste rules, copy rules and state model still hold.
 
 ## Intent
 

@@ -24,6 +24,10 @@ def headline(page) -> str:
     return (page.evaluate(f"(document.querySelector('{HEADLINE}') || {{}}).textContent || ''") or "").strip()
 
 
+def lead(page) -> str:
+    return page.evaluate("((document.querySelector('.hero') || {}).firstElementChild || {}).className || ''").split(" ")[0]
+
+
 def step(page) -> str:
     return (page.evaluate("(document.querySelector('.session .steps li[data-state=current], .session .steps li[data-state=failed]') || {}).textContent || ''") or "").strip()
 
@@ -35,6 +39,8 @@ def main() -> int:
     ap.add_argument("--chrome", default="")
     ap.add_argument("--run-seconds", type=int, default=12)
     ap.add_argument("--stage-timeout", type=int, default=150)
+    ap.add_argument("--width", type=int, default=1440)
+    ap.add_argument("--height", type=int, default=900)
     args = ap.parse_args()
     OUT.mkdir(exist_ok=True)
     failures: list[str] = []
@@ -50,7 +56,8 @@ def main() -> int:
 
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=args.chrome or None)
-        ctx = browser.new_context(viewport={"width": 1440, "height": 900})
+        mobile = args.width < 800
+        ctx = browser.new_context(viewport={"width": args.width, "height": args.height}, is_mobile=mobile, has_touch=mobile)
         page = ctx.new_page()
         errors: list[str] = []
         page.on("pageerror", lambda e: errors.append(str(e)))
@@ -77,10 +84,22 @@ def main() -> int:
             page.wait_for_timeout(400)
             h = headline(page)
             if h != last:
-                log(f"changed: headline='{h}' step='{step(page)}' title='{page.title()}' pill='{page.locator('.boardpill').text_content()}'", page)
+                log(f"changed: lead={lead(page)} headline='{h}' step='{step(page)}' title='{page.title()}' pill='{page.locator('.boardpill').text_content()}'", page)
                 last = h
             if page.locator(".stage").count():
                 staged = True
+                # the cover shows Live current while the page loads, or the finished track (Live done) during its hold
+                cover = page.evaluate("(() => { const c = document.querySelector('.stage .cover'); if (!c) return null; return [...c.querySelectorAll('.steps li')].map((li) => li.textContent + ':' + li.dataset.state).join(', ') })()")
+                log(f"stage opened: lead={lead(page)} cover={cover!r}", page)
+                if not cover or not ("Live:current" in cover or "Live:done" in cover):
+                    failures.append(f"the stage opened without its cover at Live (got {cover!r})")
+                for _ in range(100):
+                    if not page.locator(".stage .cover").count():
+                        break
+                    page.wait_for_timeout(200)
+                else:
+                    failures.append("the cover was still over the demo 20 s after the stage opened")
+                log(f"cover gone: lead={lead(page)}", page)
                 break
         if not staged:
             failures.append(f"the stage did not appear within {args.stage_timeout}s; last headline '{last}'")
@@ -99,7 +118,7 @@ def main() -> int:
                 page.wait_for_timeout(400)
                 h = headline(page)
                 if h != last:
-                    log(f"changed: headline='{h}' step='{step(page)}' title='{page.title()}' pill='{page.locator('.boardpill').text_content()}'", page)
+                    log(f"changed: lead={lead(page)} headline='{h}' step='{step(page)}' title='{page.title()}' pill='{page.locator('.boardpill').text_content()}'", page)
                     last = h
                 if page.locator(".session .big", has_text="Ended").count():
                     ended = True
