@@ -2,7 +2,7 @@
 // (demo name, time left when someone is waiting, Fullscreen, Open in a new tab, End session).
 import { useRef, useState } from 'react';
 import { copy } from '../lab/copy.ts';
-import { duration } from '../lab/derive.ts';
+import { duration, isInteractive } from '../lab/derive.ts';
 import type { Session } from '../lab/types.ts';
 import { Led } from './Led.tsx';
 
@@ -12,7 +12,7 @@ export function Stage({ session, demoName, timeLeft, onEnd }: { session: Session
   const c = copy.session.active;
   const url = session.demo_url || 'about:blank';
   return (
-    <div className="stage" id="stage">
+    <div className="stage" id="stage" data-kind={isInteractive(session.demo_id) ? 'interactive' : 'video'}>
       <div className="sbar">
         <span className="who"><Led on />{demoName}</span>
         {timeLeft != null && <span className="left">{c.left(duration(timeLeft))}</span>}

@@ -56,10 +56,25 @@ def check_layout(page: Page, name: str, width: int, failures: list[str]) -> None
     fx = page.evaluate("(() => { const f = document.querySelector('.foot'), m = document.querySelector('main'); return f && m && f.firstElementChild ? f.firstElementChild.getBoundingClientRect().left - m.getBoundingClientRect().left : null })()")
     if fx is None or abs(fx) > 1:
         failures.append(f"{name}@{width}: footer is {fx}px off the content edge")
-    # thumbnails carry their row: at least a quarter of it
-    small = page.evaluate("[...document.querySelectorAll('.demo')].filter((r) => { const t = r.querySelector('.thumb'); return t && t.offsetWidth < 0.25 * r.offsetWidth }).length")
+    # thumbnails run the full width of their card
+    small = page.evaluate("[...document.querySelectorAll('.demo')].filter((r) => { const t = r.querySelector('.thumb'); return t && t.offsetWidth < 0.9 * r.clientWidth }).length")
     if small:
-        failures.append(f"{name}@{width}: {small} thumbnail(s) under a quarter of their row")
+        failures.append(f"{name}@{width}: {small} thumbnail(s) narrower than their card")
+    # cards side by side line up: the button line starts at the same height in every card of a row
+    ragged = page.evaluate("""(() => { const rows = {}; for (const c of document.querySelectorAll('.demo')) {
+      const b = c.querySelector('.btn'); if (!b) continue; const top = Math.round(c.getBoundingClientRect().top);
+      (rows[top] ||= []).push(Math.round(b.getBoundingClientRect().top)); }
+      return Object.values(rows).filter((r) => Math.max(...r) - Math.min(...r) > 1).length })()""")
+    if ragged:
+        failures.append(f"{name}@{width}: {ragged} row(s) of cards with buttons at different heights")
+    notes = page.evaluate("document.querySelectorAll('.demo small').length")
+    if notes:
+        failures.append(f"{name}@{width}: {notes} note(s) under demo buttons")
+    # a live interactive demo gets most of a phone's screen
+    if width <= 768:
+        tall = page.evaluate("(() => { const s = document.querySelector('.stage[data-kind=interactive] iframe'); return s ? s.getBoundingClientRect().height / innerHeight : null })()")
+        if name in ("active", "reconnecting") and (tall is None or tall < 0.6):
+            failures.append(f"{name}@{width}: the interactive demo frame is {tall if tall is None else round(tall * 100)}% of the screen height (need 60%)")
     # no line of body text past 80 characters
     long = page.evaluate(
         """(() => { const out = []; for (const p of document.querySelectorAll('main p')) {
@@ -210,7 +225,7 @@ def main() -> int:
             ctx = browser.new_context(viewport={"width": 1440, "height": 900})
             page = ctx.new_page()
             open_page(page, f"{args.base}/?mock=idle", [])
-            page.locator(".demo button.btn").first.click()
+            page.evaluate("document.querySelector('.demo button.btn').click()")  # a real click would scroll the button into view first
             page.wait_for_timeout(900)
             if page.evaluate("scrollY") != 0:
                 failures.append(f"attention@1440: the page scrolled to {page.evaluate('scrollY')} although the panel was in view")

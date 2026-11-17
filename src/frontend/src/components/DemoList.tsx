@@ -1,7 +1,7 @@
 // The demos as thumbnail rows. Each row's button says exactly what pressing it does, or why it can't.
 import { copy } from '../lab/copy.ts';
 import { demoKind } from '../lab/derive.ts';
-import { rowState, type RowState } from '../lab/rows.ts';
+import { buttonLabel, rowState } from '../lab/rows.ts';
 import type { Demo, LabState } from '../lab/types.ts';
 import { Skel } from './Skeleton.tsx';
 
@@ -16,32 +16,18 @@ export function DemoThumb({ demo }: { demo: Demo }) {
   );
 }
 
-function label(kind: RowState): string {
-  switch (kind) {
-    case 'starting': return copy.demos.starting;
-    case 'queued': return copy.demos.inQueue;
-    case 'running': return copy.demos.running;
-    default: return copy.demos.start;
-  }
-}
-
 export function DemoRow({ demo, state, onStart }: { demo: Demo; state: LabState; onStart: (demoId: string) => void }) {
-  const { kind, note } = rowState(state, demo);
+  const { kind } = rowState(state, demo);
   const live = kind === 'start' || kind === 'busy';
   const chosen = kind === 'starting' || kind === 'queued' || kind === 'running';
   return (
     <article className={`demo${chosen ? ' chosen' : ''}`} data-demo={demo.id}>
-      <div className="in">
-        <div className="thumb"><DemoThumb demo={demo} /></div>
-        <div className="text">
-          <h3>{demo.name}</h3>
-          {demo.description && <p>{demo.description}</p>}
-        </div>
-        <div className="kind"><span className="tag">{demoKind(demo)}</span></div>
-        <div className="act">
-          <button type="button" className={`btn${live ? ' live' : ''}`} disabled={!live} onClick={() => onStart(demo.id)}>{label(kind)}</button>
-          {note && <small>{note}</small>}
-        </div>
+      <div className="thumb"><DemoThumb demo={demo} /></div>
+      <h3>{demo.name}</h3>
+      <p>{demo.description}</p>
+      <div className="foot-row">
+        <span className="tag">{demoKind(demo)}</span>
+        <button type="button" className={`btn${live ? ' live' : ''}`} disabled={!live} onClick={() => onStart(demo.id)}>{buttonLabel(kind)}</button>
       </div>
     </article>
   );
@@ -53,12 +39,10 @@ export function DemoList({ state, onStart }: { state: LabState; onStart: (demoId
       <div className="demolist">
         {Array.from({ length: 4 }, (_, i) => (
           <article key={i} className="demo loading" aria-hidden="true">
-            <div className="in">
-              <div className="thumb" />
-              <div className="text"><Skel h={22} w="55%" pill /><Skel h={16} w="90%" pill /></div>
-              <div className="kind"><Skel h={22} w={120} pill /></div>
-              <div className="act"><Skel h={40} w={84} pill /></div>
-            </div>
+            <div className="thumb" />
+            <Skel h={22} w="60%" pill />
+            <Skel h={16} w="90%" pill />
+            <div className="foot-row"><Skel h={24} w={120} pill /><Skel h={40} w={84} pill /></div>
           </article>
         ))}
       </div>

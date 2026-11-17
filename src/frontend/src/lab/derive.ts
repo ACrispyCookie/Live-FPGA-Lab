@@ -111,8 +111,13 @@ export function sparkPath(temps: TempSample[], width: number, height: number): s
     .join(' ');
 }
 
+/** Interactive demos draw in the browser and need a tall frame; the others are HDMI video. */
+export function isInteractive(demoId: string): boolean {
+  return demoId === 'gpgpu-nbody';
+}
+
 export function demoKind(demo: Demo): string {
-  return demo.id === 'gpgpu-nbody' ? copy.demos.kind.interactive : copy.demos.kind.hdmi;
+  return isInteractive(demo.id) ? copy.demos.kind.interactive : copy.demos.kind.hdmi;
 }
 
 export function recentOutcome(session: Session, reserved: string = copy.board.status.reservedDefault): { text: string; tone: 'ok' | 'neutral' | 'bad' } {

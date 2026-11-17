@@ -2,11 +2,11 @@
 /* registered so getComputedStyle hands the trace its resolved position in px, not the calc() */
 @property --trace-x { syntax: '<length>'; inherits: true; initial-value: 18.5px; }
 :root {
-  /* a demo card at its narrowest comfortable width: the thumbnail (9em), a short description's measure (28ch), the Start button (6em) */
-  --card: calc(15em + 28ch);
+  /* a demo card at its narrowest (a 32ch description plus padding) and at its most comfortable (a 44ch one) */
+  --card: calc(32ch + 1.8em); --card-wide: calc(44ch + 1.8em);
   --gap-s: clamp(.6rem, 1vw, .9rem);
-  /* the page holds at most three demo cards side by side */
-  --page: calc(3 * var(--card) + 2 * var(--gap-s));
+  /* the page holds four comfortable demo cards side by side, and no more */
+  --page: calc(4 * var(--card-wide) + 3 * var(--gap-s));
   /* the gutter carries the trace; the rail sits at the same share of it at every size (18.5 / 68) */
   --gutter: clamp(2.5rem, 5vw, 4.25rem); --trace-x: calc(var(--gutter) * .272);
   --gap: clamp(3.5rem, 7vw, 6rem);
@@ -181,33 +181,19 @@ main { position: relative; z-index: 1; display: grid; gap: var(--gap); padding-t
 .frame .loading { position: absolute; inset: 0; display: grid; place-items: center; color: var(--dim); background: var(--panel); }
 .frame iframe:fullscreen { width: 100vw; height: 100vh; }
 
-/* demos: cards that fill as many columns as fit at their natural width, and lay themselves out from the width they get */
-.demolist { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--card)), 1fr)); gap: var(--gap-s); }
-.demo { background: var(--panel); border-radius: var(--r-l); transition: background .2s; min-width: 0; container: demo / inline-size; }
+/* demos: cards that fill as many columns as fit. Each card spans four rows of the list (thumbnail, name, description,
+   tag and button) through a subgrid, so cards side by side line up part for part however long their text runs. */
+.demolist { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, max(var(--card), (100% - 3 * var(--gap-s)) / 4)), 1fr)); gap: var(--gap-s); }
+.demo { display: grid; grid-row: span 4; grid-template-rows: subgrid; row-gap: .55rem; background: var(--panel); border-radius: var(--r-l); padding: .6rem .6rem 1rem; transition: background .2s; min-width: 0; }
 .demo:hover { background: var(--hover); }
 .demo.chosen { background: var(--lift); }
-/* wide: the thumbnail carries a third of the card, Start sits at the right */
-.demo .in { display: grid; grid-template-columns: 32cqi minmax(0, 1fr) auto; grid-template-areas: "thumb text act" "thumb kind act"; grid-template-rows: auto auto; align-content: center; gap: .35rem 1rem; align-items: center; padding: .75rem 1rem .75rem .75rem; }
-.demo .thumb { grid-area: thumb; aspect-ratio: 120 / 76; border-radius: var(--r-m); background: var(--raised); overflow: hidden; }
+.demo .thumb { aspect-ratio: 120 / 76; border-radius: var(--r-m); background: var(--raised); overflow: hidden; margin-bottom: .3rem; }
 .demo .thumb svg, .demo .thumb img { width: 100%; height: 100%; display: block; object-fit: contain; }
-.demo .text { grid-area: text; align-self: end; display: grid; gap: 4px; min-width: 0; }
+.demo h3, .demo p, .demo .foot-row { margin-inline: .45rem; }
 .demo h3 { font-size: var(--t-lead); line-height: 1.2; overflow-wrap: break-word; }
 .demo p { color: var(--dim); }
-.demo .kind { grid-area: kind; align-self: start; display: flex; gap: 8px; flex-wrap: wrap; }
-.demo .act { grid-area: act; display: grid; justify-items: end; gap: 6px; }
-.demo .act small { color: var(--dim); font-size: var(--t-small); text-align: right; }
-.demo.loading .thumb { align-self: stretch; }
-/* narrow (the card is under its own --card minimum, i.e. a single column on a small screen): a banner thumbnail on top,
-   then the text, then the tag and Start on one line. The query mirrors --card: 15em + 28ch. */
-@container demo (inline-size < calc(15em + 28ch)) {
-  .demo .in { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "thumb thumb" "text text" "kind act"; grid-template-rows: auto auto auto; padding: .6rem .6rem .9rem; gap: .7rem .75rem; }
-  .demo .thumb { aspect-ratio: 2 / 1; }
-  .demo .text { padding-inline: .35rem; }
-  .demo .kind { align-self: center; padding-left: .35rem; }
-  .demo .act { grid-auto-flow: column; align-items: center; gap: 10px; }
-  .demo h3 { font-size: clamp(1.1rem, 5cqi, var(--t-lead)); }
-  .demo p { font-size: var(--t-small); }
-}
+.demo .foot-row { display: flex; align-items: center; justify-content: space-between; gap: .75rem; flex-wrap: wrap; align-self: end; padding-top: .35rem; }
+.demo.loading > .skel { margin-inline: .45rem; }
 
 /* recent */
 /* two columns once two rows fit at a comfortable width (a name, its outcome and the time on one line) */
@@ -226,17 +212,19 @@ main { position: relative; z-index: 1; display: grid; gap: var(--gap); padding-t
 .foot a { color: var(--silk); }
 
 /* toasts: for the unexpected only */
-.toast-stack { position: fixed; top: calc(max(0px, env(safe-area-inset-top)) + var(--bar) + .75rem); right: max(var(--edge), env(safe-area-inset-right)); z-index: 50; width: min(24rem, calc(100vw - 2 * var(--edge))); display: grid; gap: 10px; pointer-events: none; }
+.toast-stack { position: fixed; bottom: max(var(--edge), env(safe-area-inset-bottom)); right: max(var(--edge), env(safe-area-inset-right)); z-index: 50; width: min(24rem, calc(100vw - 2 * var(--edge))); display: grid; gap: 10px; pointer-events: none; }
 .toast { width: 100%; display: grid; grid-template-columns: 10px 1fr; gap: 12px; align-items: start; padding: 14px 15px; border-radius: var(--r-m); border: 0; background: var(--raised); color: var(--silk); text-align: left; font-size: var(--t-small); line-height: 1.4; cursor: pointer; pointer-events: auto; }
 .toast-dot { width: 10px; height: 10px; margin-top: 5px; border-radius: 999px; background: var(--dim); }
 .toast-success .toast-dot { background: var(--led); }
 .toast-warn .toast-dot, .toast-error .toast-dot { background: var(--amber); }
 .toast-info .toast-dot { background: var(--cyan); }
 
-/* a narrow hero (a phone): the demo keeps a 4:3 frame so the bar and End session stay on screen, and the actions share a row */
+/* a narrow hero (a phone): an interactive demo gets the whole screen under the bar, video keeps its 16:9 frame, and
+   the actions share a row */
 @container hero (inline-size < 40em) {
   .stage { min-height: 0; border-radius: var(--r-l); }
-  .frame { aspect-ratio: 4 / 3; }
+  .stage[data-kind="interactive"] { height: calc(100dvh - var(--bar) - 1.5rem); }
+  .stage[data-kind="video"] .frame { aspect-ratio: 16 / 9; }
   .sbar { padding: 10px 12px; }
   .sbar .acts { margin-left: 0; width: 100%; }
   .sbar .acts .btn { flex: 1; }

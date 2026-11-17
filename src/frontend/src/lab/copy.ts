@@ -47,8 +47,7 @@ export const copy = {
     heading: 'Demos',
     lead: "Each one programs the board with a different design. The n-body demo talks to the board over UART and draws in your browser; the others are captured from the board's HDMI output.",
     kind: { interactive: 'Interactive 3D view', hdmi: 'Live HDMI capture' },
-    start: 'Start', starting: 'Starting…', inQueue: 'In your queue', running: 'Running',
-    note: { joins: 'Joins the queue', oneAtATime: 'One session at a time', reserved: (what: string) => `In use for ${what}`, fault: 'Until the board recovers', unavailable: 'Unavailable' },
+    start: 'Start', join: 'Join the queue', starting: 'Starting…', inQueue: 'In your queue', running: 'Running',
     empty: 'No demos are available right now.',
   },
   recent: {

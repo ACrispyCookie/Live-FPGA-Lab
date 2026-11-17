@@ -1,20 +1,29 @@
-// Which button each demo row shows, and why, from the whole state. Pure, so it is testable without React.
+// Which button each demo card shows, from the whole state. Pure, so it is testable without React. The button says
+// everything: the session panel explains why the board is unavailable, so the cards don't repeat it.
 import { copy } from './copy.ts';
-import { phase, reservedFor } from './derive.ts';
+import { phase } from './derive.ts';
 import { isLive } from './reducer.ts';
 import type { Demo, LabState } from './types.ts';
 
 export type RowState = 'start' | 'starting' | 'queued' | 'running' | 'busy' | 'blocked';
 
-export function rowState(state: LabState, demo: Demo): { kind: RowState; note: string | null } {
+export function rowState(state: LabState, demo: Demo): { kind: RowState } {
   const p = phase(state);
-  if (p === 'connecting' || p === 'offline') return { kind: 'blocked', note: copy.demos.note.unavailable };
-  if (p === 'fault') return { kind: 'blocked', note: copy.demos.note.fault };
-  if (state.requesting?.demoId === demo.id) return { kind: 'starting', note: null };
+  if (p === 'connecting' || p === 'offline' || p === 'fault') return { kind: 'blocked' };
+  if (state.requesting?.demoId === demo.id) return { kind: 'starting' };
   const own = isLive(state.session) ? state.session : null;
-  if (own && own.demo_id === demo.id) return { kind: own.status === 'queued' ? 'queued' : own.status === 'starting' ? 'starting' : 'running', note: null };
-  if (p === 'project') return { kind: 'blocked', note: copy.demos.note.reserved(reservedFor(state)) };
-  if (own || state.requesting) return { kind: 'blocked', note: copy.demos.note.oneAtATime };
-  if (p === 'busy') return { kind: 'busy', note: copy.demos.note.joins };
-  return { kind: 'start', note: null };
+  if (own && own.demo_id === demo.id) return { kind: own.status === 'queued' ? 'queued' : own.status === 'starting' ? 'starting' : 'running' };
+  if (p === 'project' || own || state.requesting) return { kind: 'blocked' };
+  if (p === 'busy') return { kind: 'busy' };
+  return { kind: 'start' };
+}
+
+export function buttonLabel(kind: RowState): string {
+  switch (kind) {
+    case 'starting': return copy.demos.starting;
+    case 'queued': return copy.demos.inQueue;
+    case 'running': return copy.demos.running;
+    case 'busy': return copy.demos.join;
+    default: return copy.demos.start;
+  }
 }

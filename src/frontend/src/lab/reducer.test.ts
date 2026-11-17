@@ -129,7 +129,7 @@ test('ui.message adds a toast with a level', () => {
   assert.equal(s.toasts[0].message, 'Programming failed.');
   s = reduce(s, { type: 'toast.dismissed', id: s.toasts[0].id }, T0);
   assert.equal(s.toasts.length, 0);
-  for (let i = 0; i < 6; i++) s = reduce(s, { type: 'ui.message', level: 'info', message: `m${i}` }, T0 + i);
+  for (let i = 0; i < 6; i++) s = reduce(s, { type: 'ui.message', level: 'error', message: `m${i}` }, T0 + i);
   assert.equal(s.toasts.length, 4);
 });
 
@@ -138,4 +138,10 @@ test('tick updates now and nothing else', () => {
   const t = reduce(s, { type: 'tick', now: T0 + 1000 }, T0 + 1000);
   assert.equal(t.now, T0 + 1000);
   assert.deepEqual({ ...t, now: s.now }, s);
+});
+
+test('info and success messages raise no toast: the session panel already says them', () => {
+  let s = reduce(ready(), { type: 'ui.message', level: 'info', message: 'Programming FPGA...' }, T0);
+  s = reduce(s, { type: 'ui.message', level: 'success', message: 'Demo ready.' }, T0);
+  assert.equal(s.toasts.length, 0);
 });

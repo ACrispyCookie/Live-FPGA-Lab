@@ -107,7 +107,10 @@ export function reduce(state: LabState, action: Action, now: number = Date.now()
       return { ...state, requesting: null, lastError: action.error?.message || copy.session.errorFallback };
     }
     case 'ui.message': {
-      const toast: Toast = { id: `${now}-${Math.random().toString(36).slice(2, 8)}`, level: toastLevel(action.level), message: String(action.message || copy.toast.fallback) };
+      // the session panel already narrates the visitor's own progress; only warnings and errors interrupt
+      const level = toastLevel(action.level);
+      if (level === 'info' || level === 'success') return state;
+      const toast: Toast = { id: `${now}-${Math.random().toString(36).slice(2, 8)}`, level, message: String(action.message || copy.toast.fallback) };
       return { ...state, toasts: [...state.toasts.slice(-(TOASTS_MAX - 1)), toast] };
     }
     case 'socket.opened':
