@@ -52,10 +52,27 @@ def check_layout(page: Page, name: str, width: int, failures: list[str]) -> None
     elif gap < 28:
         failures.append(f"{name}@{width}: trace only {gap:.0f}px from the content (need 28)")
 
-    # the footer belongs to the content column
-    fx = page.evaluate("(() => { const f = document.querySelector('.foot'), m = document.querySelector('main'); return f && m && f.firstElementChild ? f.firstElementChild.getBoundingClientRect().left - m.getBoundingClientRect().left : null })()")
-    if fx is None or abs(fx) > 1:
-        failures.append(f"{name}@{width}: footer is {fx}px off the content edge")
+    # the footer, as on njason.dev: a full-width band off the trace, its content aligned with the page's column
+    foot = page.evaluate("""(() => { const f = document.querySelector('.foot'), i = document.querySelector('.foot-in'), m = document.querySelector('main');
+      if (!f || !m) return null; return { inWrap: !!f.closest('.wrap'), pad: f.hasAttribute('data-pad'), width: f.getBoundingClientRect().width,
+      vw: document.documentElement.clientWidth, inner: i && i.firstElementChild ? i.firstElementChild.getBoundingClientRect().left - m.getBoundingClientRect().left : null } })()""")
+    if foot is None:
+        failures.append(f"{name}@{width}: no footer")
+    else:
+        if foot["inWrap"] or foot["pad"]:
+            failures.append(f"{name}@{width}: the footer is on the trace (inside .wrap: {foot['inWrap']}, data-pad: {foot['pad']})")
+        if abs(foot["width"] - foot["vw"]) > 1:
+            failures.append(f"{name}@{width}: the footer is {foot['width']:.0f}px wide, not the full {foot['vw']}px")
+        if foot["inner"] is None or abs(foot["inner"]) > 1:
+            failures.append(f"{name}@{width}: the footer's content is {foot['inner']}px off the content edge")
+    # at the bottom of the page the whole trace is drawn
+    page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
+    page.wait_for_timeout(1500)
+    dark = page.evaluate("[...document.querySelectorAll('.t-pad')].filter((p) => !p.classList.contains('on')).length")
+    if dark:
+        failures.append(f"{name}@{width}: {dark} pad(s) still dark at the bottom of the page")
+    page.evaluate("window.scrollTo(0, 0)")
+    page.wait_for_timeout(300)
     # thumbnails run the full width of their card
     small = page.evaluate("[...document.querySelectorAll('.demo')].filter((r) => { const t = r.querySelector('.thumb'); return t && t.offsetWidth < 0.9 * r.clientWidth }).length")
     if small:

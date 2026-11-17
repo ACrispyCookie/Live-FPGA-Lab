@@ -3,6 +3,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { autostart, withoutStart } from './autostart.ts';
 import { BoardPanel } from './components/BoardPanel.tsx';
 import { DemoList } from './components/DemoList.tsx';
+import { Footer } from './components/Footer.tsx';
 import { RecentSessions } from './components/RecentSessions.tsx';
 import { SessionPanel } from './components/SessionPanel.tsx';
 import { Stage } from './components/Stage.tsx';
@@ -157,12 +158,9 @@ export function App() {
             <p className="lead">{copy.recent.lead}</p>
             <RecentSessions state={state} />
           </section>
-          <footer className="foot" data-pad>
-            <span>{copy.site.partOf} <a href={copy.site.home}>njason.dev</a></span>
-            <a href={copy.site.source}>{copy.site.sourceLabel}</a>
-          </footer>
         </main>
       </div>
+      <Footer />
     </>
   );
 }

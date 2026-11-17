@@ -70,6 +70,16 @@ export const copy = {
     default: (d: string) => `Your ${d} session ended.`,
   } as Record<string, (d: string) => string>,
   endedReserved: (d: string, what: string) => `Your ${d} session ended: the board was needed for ${what}.`,
+  footer: {
+    line: 'Live FPGA Lab: a real board on the bench in my homelab.',
+    links: [
+      { label: 'Portfolio', href: 'https://njason.dev' },
+      { label: 'Projects', href: 'https://njason.dev/projects' },
+      { label: 'GitHub', href: 'https://github.com/ACrispyCookie' },
+      { label: 'LinkedIn', href: 'https://www.linkedin.com/in/jason-nikas-b64163255' },
+    ],
+    copyright: (year: number) => `© ${year} Jason Nikas`,
+  },
   title: { base: 'Live FPGA Lab', programming: 'Programming the board', inLine: (place: string) => `${place} in line`, live: 'Your demo is live' },
   toast: { fallback: 'Update received.' },
   fallback: { needsJs: 'Live FPGA Lab: a real FPGA board in my homelab. This page needs JavaScript to connect to it.' },

@@ -15,7 +15,7 @@
   --bar: 62px;
 }
 html { scroll-behavior: smooth; scroll-padding-top: calc(var(--bar) + 12px); }
-body { font-size: clamp(1rem, .97rem + .25vw, var(--t-body)); padding-left: max(var(--edge), env(safe-area-inset-left, 0px)); padding-right: max(var(--edge), env(safe-area-inset-right, 0px)); padding-bottom: var(--gap); }
+body { font-size: clamp(1rem, .97rem + .25vw, var(--t-body)); padding-left: max(var(--edge), env(safe-area-inset-left, 0px)); padding-right: max(var(--edge), env(safe-area-inset-right, 0px)); }
 a { color: inherit; text-underline-offset: 3px; text-decoration-thickness: 1.5px; }
 h1, h2, h3, p { margin: 0; }
 h1, h2, h3 { font-family: var(--font-display); letter-spacing: -.02em; }
@@ -42,7 +42,9 @@ button { font: inherit; }
 .boardpill.tone-cyan span { color: var(--cyan); }
 .boardpill.tone-amber span { color: var(--amber); }
 /* when the name, the nav and the pill no longer fit on one line, the nav goes (the pill and the page carry it) */
-@container bar (inline-size < 44em) { .topbar nav { display: none; } .boardpill b { display: none; } }
+/* the name lines up with the page's content edge (as the portfolio's does), except on narrow screens */
+.topbar .in { padding-left: var(--gutter); }
+@container bar (inline-size < 44em) { .topbar nav { display: none; } .boardpill b { display: none; } .topbar .in { padding-left: 0; } }
 
 /* LED: a filled dot, breathing while online, blinking while programming */
 .led { width: 10px; height: 10px; border-radius: 50%; background: var(--led); flex: none; display: inline-block; }
@@ -209,9 +211,21 @@ main { position: relative; z-index: 1; display: grid; gap: var(--gap); padding-t
 .rec time { color: var(--dim); font-size: var(--t-small); white-space: nowrap; }
 .empty { background: var(--panel); border-radius: var(--r-l); padding: 22px; color: var(--dim); }
 
-/* the footer is the last stop on the trace: same column, same gap as the sections above it */
-.foot { display: flex; gap: .5rem 1.2rem; flex-wrap: wrap; align-items: center; color: var(--dim); font-size: var(--t-small); }
-.foot a { color: var(--silk); }
+/* the footer, as on njason.dev: a full-width band at the very bottom, off the trace, its content in the page's column */
+.foot { margin: var(--gap) calc(-1 * max(var(--edge), env(safe-area-inset-right, 0px))) 0 calc(-1 * max(var(--edge), env(safe-area-inset-left, 0px)));
+  padding: 36px max(var(--edge), env(safe-area-inset-right, 0px)) calc(28px + env(safe-area-inset-bottom, 0px)) max(var(--edge), env(safe-area-inset-left, 0px));
+  background: var(--panel); color: var(--silk); container: foot / inline-size; }
+.foot-in { width: min(100%, calc(var(--page) + var(--gutter))); margin: 0 auto; padding-left: var(--gutter); display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 18px 24px; }
+.foot b { font: 700 var(--t-lead) var(--font-display); }
+.foot p { color: var(--dim); margin-top: 4px; }
+.foot .links { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px 18px; }
+.foot .links a { color: var(--dim); text-decoration: none; transition: color .2s; }
+.foot .links a:hover { color: var(--silk); }
+.foot small { grid-column: 1 / -1; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; color: var(--dim); font-size: var(--t-small); }
+.foot small a { color: var(--dim); }
+.foot small a:hover { color: var(--silk); }
+/* when the name and the links no longer fit side by side, they stack, links first-aligned */
+@container foot (inline-size < 48em) { .foot-in { grid-template-columns: 1fr; } .foot .links { justify-content: flex-start; } }
 
 /* toasts: for the unexpected only */
 .toast-stack { position: fixed; bottom: max(var(--edge), env(safe-area-inset-bottom)); right: max(var(--edge), env(safe-area-inset-right)); z-index: 50; width: min(24rem, calc(100vw - 2 * var(--edge))); display: grid; gap: 10px; pointer-events: none; }

@@ -63,7 +63,12 @@ export function Trace({ online, layoutKey }: { online: boolean; layoutKey: strin
     }
     function lenAtY(y: number) { if (!samples.length) return 0; for (const [l, sy] of samples) if (sy >= y) return l; return total; }
     // Under reduced motion the whole trace is drawn and every pad lit, whatever the scroll position.
-    function measure() { const hb = host!.getBoundingClientRect(); target = reduce ? total : lenAtY(innerHeight * 0.78 - hb.top); }
+    // At the bottom of the page the whole trace is drawn, however short the last section is.
+    function measure() {
+      const hb = host!.getBoundingClientRect();
+      const atBottom = scrollY + innerHeight >= document.documentElement.scrollHeight - 2;
+      target = reduce || atBottom ? total : lenAtY(innerHeight * 0.78 - hb.top);
+    }
     function frame(now: number) {
       const dt = Math.min(now - last, 50); last = now;
       if (!Number.isFinite(shown)) shown = total;
