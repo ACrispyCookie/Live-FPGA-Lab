@@ -24,6 +24,10 @@ def headline(page) -> str:
     return (page.evaluate(f"(document.querySelector('{HEADLINE}') || {{}}).textContent || ''") or "").strip()
 
 
+def step(page) -> str:
+    return (page.evaluate("(document.querySelector('.session .steps li[data-state=current], .session .steps li[data-state=failed]') || {}).textContent || ''") or "").strip()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default="https://fpga.njason.dev")
@@ -61,7 +65,10 @@ def main() -> int:
         row = page.locator(f".demo[data-demo='{args.demo}']")
         row.locator("button.btn").click()
         page.wait_for_timeout(60)
-        log(f"clicked Start: headline='{headline(page)}' button='{row.locator('button.btn').text_content()}'", page)
+        log(f"clicked Start: headline='{headline(page)}' step='{step(page)}' title='{page.title()}' button='{row.locator('button.btn').text_content()}'", page)
+        page.wait_for_timeout(1940)
+        if page.title() != "Programming the board" and not page.locator(".stage").count():
+            failures.append(f"the tab title is '{page.title()}' 2 s after Start, expected 'Programming the board'")
 
         last = headline(page)
         staged = False
@@ -70,7 +77,7 @@ def main() -> int:
             page.wait_for_timeout(400)
             h = headline(page)
             if h != last:
-                log(f"changed: headline='{h}' pill='{page.locator('.boardpill').text_content()}'", page)
+                log(f"changed: headline='{h}' step='{step(page)}' title='{page.title()}' pill='{page.locator('.boardpill').text_content()}'", page)
                 last = h
             if page.locator(".stage").count():
                 staged = True
@@ -92,7 +99,7 @@ def main() -> int:
                 page.wait_for_timeout(400)
                 h = headline(page)
                 if h != last:
-                    log(f"changed: headline='{h}' pill='{page.locator('.boardpill').text_content()}'", page)
+                    log(f"changed: headline='{h}' step='{step(page)}' title='{page.title()}' pill='{page.locator('.boardpill').text_content()}'", page)
                     last = h
                 if page.locator(".session .big", has_text="Ended").count():
                     ended = True
@@ -102,7 +109,9 @@ def main() -> int:
             else:
                 sentence = page.locator(".session .sub").first.text_content()
                 recent = page.locator(".rec").first.text_content()
-                log(f"ended: sentence='{sentence}' recent='{recent}'", page)
+                log(f"ended: sentence='{sentence}' recent='{recent}' title='{page.title()}'", page)
+                if page.title() != "Live FPGA Lab":
+                    failures.append(f"the tab title stayed '{page.title()}' after the session ended")
         failures.extend(f"page error: {e}" for e in errors)
         browser.close()
 

@@ -1,6 +1,6 @@
 # Lab layout and attention: design
 
-Status: draft for Jason's approval (2026-11-17). Follows `2026-11-17-frontend-redesign-design.md`; everything there (tokens, taste rules, copy rules, state model) still holds.
+Status: implemented on branch feature/frontend-redesign and deployed to vm2 (2026-11-17). Follows `2026-11-17-frontend-redesign-design.md`; everything there (tokens, taste rules, copy rules, state model) still holds.
 
 ## Intent
 
