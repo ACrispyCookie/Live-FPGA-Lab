@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import asyncio
 import logging
 from collections.abc import AsyncIterator
@@ -813,9 +815,15 @@ class BoardManager:
 
     @staticmethod
     def _public_demo(demo: Any) -> dict[str, Any]:
+        thumbnail = getattr(demo, "thumbnail", None)
         result = {
             "id": getattr(demo, "id"),
             "name": getattr(demo, "name"),
+            "thumbnail_url": (
+                f"/api/demos/{getattr(demo, 'id')}/thumbnail"
+                if thumbnail is not None and Path(thumbnail).is_file()
+                else None
+            ),
         }
 
         description = getattr(demo, "description", None)

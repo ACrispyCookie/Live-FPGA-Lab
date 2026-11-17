@@ -25,4 +25,6 @@ if [ "${1:-}" = "--no-build" ]; then
   exit 0
 fi
 
-ssh "$host" "cd $dest && VITE_MOCK_STATES=${VITE_MOCK_STATES:-0} docker compose build web-api && docker compose up -d web-api && docker compose ps web-api"
+# A VITE_MOCK_STATES set in this shell wins; otherwise the host's .env decides (compose reads it).
+mock_env=${VITE_MOCK_STATES:+VITE_MOCK_STATES=$VITE_MOCK_STATES }
+ssh "$host" "cd $dest && ${mock_env}docker compose build web-api && docker compose up -d web-api && docker compose ps web-api"
