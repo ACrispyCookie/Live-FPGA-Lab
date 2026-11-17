@@ -15,8 +15,8 @@ from pathlib import Path
 
 from playwright.sync_api import Page, sync_playwright
 
-FIXTURES = ["connecting", "idle", "busy", "requesting", "queued", "starting", "active", "ending", "ended", "project", "fault", "offline", "reconnecting", "error"]
-WIDTHS = [360, 390, 768, 1100, 1440]
+FIXTURES = ["connecting", "idle", "busy", "requesting", "queued", "starting", "active", "ending", "ended", "project", "fault", "offline", "reconnecting", "error", "longname"]
+WIDTHS = [320, 390, 768, 1280, 1440, 1920, 2560]
 OUT = Path(__file__).resolve().parent / "out"
 
 
@@ -27,9 +27,10 @@ def open_page(page: Page, url: str, errors: list[str]) -> None:
     page.wait_for_timeout(1200)
     # the sections switch on as the trace reaches them: scroll through the page so a full-page capture shows everything
     height = page.evaluate("document.documentElement.scrollHeight")
-    for y in range(0, height + 600, 500):
+    step = max(500, int(page.evaluate("innerHeight") * 0.8))
+    for y in range(0, height + step, step):
         page.evaluate(f"window.scrollTo(0, {y})")
-        page.wait_for_timeout(120)
+        page.wait_for_timeout(90)
     page.evaluate("window.scrollTo(0, 0)")
     page.wait_for_timeout(600)
 
@@ -50,6 +51,23 @@ def check_layout(page: Page, name: str, width: int, failures: list[str]) -> None
         failures.append(f"{name}@{width}: no trace or main element")
     elif gap < 28:
         failures.append(f"{name}@{width}: trace only {gap:.0f}px from the content (need 28)")
+
+    # the footer belongs to the content column
+    fx = page.evaluate("(() => { const f = document.querySelector('.foot'), m = document.querySelector('main'); return f && m && f.firstElementChild ? f.firstElementChild.getBoundingClientRect().left - m.getBoundingClientRect().left : null })()")
+    if fx is None or abs(fx) > 1:
+        failures.append(f"{name}@{width}: footer is {fx}px off the content edge")
+    # thumbnails carry their row: at least a quarter of it
+    small = page.evaluate("[...document.querySelectorAll('.demo')].filter((r) => { const t = r.querySelector('.thumb'); return t && t.offsetWidth < 0.25 * r.offsetWidth }).length")
+    if small:
+        failures.append(f"{name}@{width}: {small} thumbnail(s) under a quarter of their row")
+    # no line of body text past 80 characters
+    long = page.evaluate(
+        """(() => { const out = []; for (const p of document.querySelectorAll('main p')) {
+          if (!p.offsetParent) continue; const s = document.createElement('span'); s.textContent = '0'; s.style.visibility = 'hidden'; p.appendChild(s);
+          const ch = s.getBoundingClientRect().width; s.remove(); const n = p.clientWidth / ch; if (n > 80) out.push(Math.round(n)); } return out })()"""
+    )
+    if long:
+        failures.append(f"{name}@{width}: paragraph measure {long} ch (max 80)")
 
 
 def _lum(rgb: str) -> float:
