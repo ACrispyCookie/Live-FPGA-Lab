@@ -27,7 +27,8 @@ export const copy = {
     heading: 'Your session',
     idle: { head: 'The board is free', body: 'Pick a demo below and the board is programmed for you right away. You keep it as long as nobody is waiting.', cta: 'Choose a demo' },
     busy: { head: 'Someone is on the board', body: (demo: string | null, waiting: number) => `${demo ? `${demo} is running for another visitor` : 'Another visitor is using the board'}${waiting ? `, and ${waiting === 1 ? 'one more is' : `${waiting} more are`} waiting` : ''}. Pick a demo to join the queue; each turn is 5 minutes once somebody waits.`, cta: 'Choose a demo' },
-    requesting: { head: (demo: string) => `Requesting the board for ${demo}`, body: 'One moment.' },
+    requesting: { head: (demo: string) => `Requesting the board for ${demo}`, body: 'Asking the lab for the board. If someone is on it, you join the queue instead.' },
+    opening: 'The board is ready. The demo is opening.',
     queued: { forDemo: 'For', eta: (t: string) => `Estimated start in ${t}. Each visitor gets 5 minutes once somebody is waiting.`, noEta: 'The current visitor has no time limit until someone waits, and you are next; your turn starts within about 6 minutes of now.', leave: 'Leave the queue' },
     starting: { head: (demo: string) => `Programming the board for ${demo}`, body: 'The bitstream is loading and the processor is booting. The demo appears here as soon as the board is ready.', cancel: 'Cancel' },
     active: { left: (t: string) => `${t} left, someone is waiting`, fullscreen: 'Fullscreen', newTab: 'Open in a new tab', end: 'End session', loading: 'Loading the demo' },
@@ -40,7 +41,7 @@ export const copy = {
     opened: { portfolio: 'Opened from njason.dev', link: 'Opened from a link' },
     errorFallback: 'Could not start the demo.',
     steps: { requested: 'Requested', programming: 'Programming the board', live: 'Live' },
-    failed: { head: (d: string) => `Programming the board for ${d} failed`, retry: 'Try again' },
+    failed: { head: (d: string) => `Programming the board for ${d} failed`, body: 'The board is free again. Try once more, or pick another demo.', retry: 'Try again' },
   },
   demos: {
     heading: 'Demos',

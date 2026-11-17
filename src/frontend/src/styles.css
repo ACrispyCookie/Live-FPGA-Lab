@@ -129,7 +129,7 @@ main { position: relative; z-index: 1; display: grid; gap: var(--gap); padding-t
 .board.compact .body { grid-template-columns: minmax(0, auto) minmax(0, 1fr); align-items: center; gap: 24px; }
 @container board (inline-size < 40em) { .board.compact .body { grid-template-columns: 1fr; } }
 
-.session { background: var(--panel); border-radius: var(--r-xl); padding: clamp(1.1rem, 3vw, 1.4rem); display: grid; gap: 16px; align-content: start; min-width: 0; }
+.session { position: relative; background: var(--panel); border-radius: var(--r-xl); padding: clamp(1.1rem, 3vw, 1.4rem); display: grid; gap: 16px; align-content: start; min-width: 0; }
 .session h2 { font-size: var(--t-lead); line-height: 1.2; }
 .session .big { font: 800 clamp(2rem, 4vw, 2.8rem)/1 var(--font-display); letter-spacing: -.03em; }
 .session .big em { font-style: normal; color: var(--cyan); }
@@ -142,6 +142,28 @@ main { position: relative; z-index: 1; display: grid; gap: var(--gap); padding-t
 .session.warn .demo-name { color: var(--amber); }
 .session .error { color: var(--amber); }
 .session .btn { justify-self: start; }
+/* the request in flight: the chosen demo, its steps on a short trace, one sentence on what happens now */
+.session h2:focus { outline: none; }
+.session .pick { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.session .pthumb { flex: none; width: 4.5em; aspect-ratio: 120 / 76; border-radius: 10px; overflow: hidden; background: var(--raised); }
+.session .pthumb img, .session .pthumb svg { width: 100%; height: 100%; display: block; object-fit: contain; }
+.session .pick b { font: 700 var(--t-lead)/1.2 var(--font-display); color: var(--cyan); overflow-wrap: break-word; min-width: 0; }
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; position: relative; }
+.steps::before { content: ""; position: absolute; left: 5px; top: .8em; bottom: .8em; width: 2px; background: var(--hover); }
+.steps li { position: relative; display: flex; align-items: center; gap: 14px; color: var(--dim); }
+.steps .sl { width: 12px; height: 12px; border-radius: 50%; background: var(--lift); flex: none; }
+.steps li[data-state="done"] { color: var(--silk); }
+.steps li[data-state="done"] .sl { background: var(--cyan); }
+.steps li[data-state="current"] { color: var(--silk); font-weight: 600; }
+.steps li[data-state="current"] .sl { background: var(--cyan); }
+.rv .steps li[data-state="current"] .sl { animation: breathe 1s ease-in-out infinite; }
+.steps li[data-state="failed"] { color: var(--silk); font-weight: 600; }
+.steps li[data-state="failed"] .sl { background: var(--fault); }
+.session .now { color: var(--dim); }
+.sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+/* one cyan ring when the visitor's own action changes the panel; it answers the click, then gets out of the way */
+.rv .session.flash { animation: ring 1.2s cubic-bezier(.16, 1, .3, 1); }
+@keyframes ring { from { outline: 3px solid var(--cyan); outline-offset: 0; } to { outline: 3px solid transparent; outline-offset: 12px; } }
 /* each phase change rises into place; the old content is replaced, nothing lingers */
 .session .phase { display: grid; gap: 16px; }
 .rv .session .phase { animation: rise .3s cubic-bezier(.16, 1, .3, 1); }

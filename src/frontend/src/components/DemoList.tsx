@@ -5,7 +5,7 @@ import { rowState, type RowState } from '../lab/rows.ts';
 import type { Demo, LabState } from '../lab/types.ts';
 import { Skel } from './Skeleton.tsx';
 
-function DemoThumb({ demo }: { demo: Demo }) {
+export function DemoThumb({ demo }: { demo: Demo }) {
   if (demo.thumbnail_url) return <img src={demo.thumbnail_url} alt="" width="120" height="76" loading="lazy" />;
   return (
     <svg viewBox="0 0 120 76" aria-hidden="true">

@@ -57,6 +57,7 @@ export const FIXTURES: Record<string, () => LabState> = {
   offline: () => make(board({ status: 'offline', telemetry: { temperature_c: null } })),
   reconnecting: () => ({ ...make(board({ status: 'running' }), { session: session({ status: 'active', demo_url: 'about:blank' }) }), socket: 'reconnecting' }),
   longname: () => ({ ...make(board()), demos: [...DEMOS, { id: 'gpgpu-cathedral', name: 'GPGPU deferred-shading cathedral flythrough with volumetric fog', description: 'A slow camera path through a cathedral nave, lit by shafts of light through volumetric fog; the GPGPU shades every pixel of every frame, shown live over HDMI.', thumbnail_url: null }] }),
+  failed: () => make(board(), {}, { lastEnded: session({ status: 'ended', demo_id: 'gpgpu-cube', started_at: null, ended_at: iso(NOW - 4000), end_reason: 'programming_failed' }) }),
   error: () => make(board(), {}, { lastError: 'The FPGA is currently reserved for owner projects.' }),
 };
 

@@ -15,7 +15,7 @@ from pathlib import Path
 
 from playwright.sync_api import Page, sync_playwright
 
-FIXTURES = ["connecting", "idle", "busy", "requesting", "queued", "starting", "active", "ending", "ended", "project", "fault", "offline", "reconnecting", "error", "longname"]
+FIXTURES = ["connecting", "idle", "busy", "requesting", "queued", "starting", "active", "ending", "ended", "project", "fault", "offline", "reconnecting", "error", "longname", "failed"]
 WIDTHS = [320, 390, 768, 1280, 1440, 1920, 2560]
 OUT = Path(__file__).resolve().parent / "out"
 
@@ -68,6 +68,33 @@ def check_layout(page: Page, name: str, width: int, failures: list[str]) -> None
     )
     if long:
         failures.append(f"{name}@{width}: paragraph measure {long} ch (max 80)")
+
+
+def attention_flow(browser, base: str, width: int, failures: list[str]) -> None:
+    """Start from the bottom of the page: the session panel comes into view, takes focus, shows the steps and names the tab."""
+    ctx = browser.new_context(viewport={"width": width, "height": 900})
+    page = ctx.new_page()
+    errors: list[str] = []
+    open_page(page, f"{base}/?mock=idle", errors)
+    page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
+    page.wait_for_timeout(400)
+    page.locator(".demo button.btn").last.click()
+    page.wait_for_timeout(900)
+    tag = f"attention@{width}"
+    top, bottom, vh = page.evaluate("(() => { const r = document.querySelector('.session').getBoundingClientRect(); return [r.top, r.bottom, innerHeight] })()")
+    if not (0 <= top < vh):
+        failures.append(f"{tag}: the session panel's top is at {top:.0f}px after Start, outside the viewport")
+    if not page.evaluate("document.activeElement && document.activeElement.matches('.session h2')"):
+        failures.append(f"{tag}: focus is not on the session heading")
+    states = page.evaluate("[...document.querySelectorAll('.session .steps li')].map((li) => li.dataset.state)")
+    if len(states) != 3 or states[0] != "current":
+        failures.append(f"{tag}: steps are {states}, expected three with the first current")
+    title = page.evaluate("document.title")
+    if title != "Programming the board":
+        failures.append(f"{tag}: tab title is '{title}'")
+    failures.extend(f"{tag}: {e}" for e in errors)
+    page.screenshot(path=str(OUT / f"attention-{width}.png"), full_page=False)
+    ctx.close()
 
 
 def _lum(rgb: str) -> float:
@@ -159,9 +186,9 @@ def main() -> int:
             first = page.locator(".demo button.btn").first
             first.click()
             page.wait_for_timeout(50)
-            head = page.locator(".session .demo-name").first.text_content() or ""
-            if "Requesting the board" not in head:
-                failures.append(f"flow: after Start the session panel says '{head}' instead of 'Requesting the board'")
+            head = page.locator(".session .steps li[data-state='current']").first.text_content() if page.locator(".session .steps li[data-state='current']").count() else ""
+            if "Requested" not in head:
+                failures.append(f"flow: after Start the current step is '{head}' instead of 'Requested'")
             if not first.is_disabled():
                 failures.append("flow: the pressed Start button is still enabled")
             second = page.locator(".demo button.btn").nth(1)
@@ -175,6 +202,30 @@ def main() -> int:
                 failures.append(f"flow: {sends} start requests were dispatched for one click and one double click, expected 1")
             failures.extend(f"flow: {e}" for e in errors)
             page.screenshot(path=str(OUT / "flow-after-start.png"), full_page=True)
+            ctx.close()
+
+            for width in (1440, 390):
+                attention_flow(browser, args.base, width, failures)
+            # the panel was already in view: no scroll at all, focus still lands on it
+            ctx = browser.new_context(viewport={"width": 1440, "height": 900})
+            page = ctx.new_page()
+            open_page(page, f"{args.base}/?mock=idle", [])
+            page.locator(".demo button.btn").first.click()
+            page.wait_for_timeout(900)
+            if page.evaluate("scrollY") != 0:
+                failures.append(f"attention@1440: the page scrolled to {page.evaluate('scrollY')} although the panel was in view")
+            if not page.evaluate("document.activeElement && document.activeElement.matches('.session h2')"):
+                failures.append("attention@1440: focus is not on the session heading when no scroll was needed")
+            ctx.close()
+
+        if not args.no_mock and "failed" in fixtures:
+            ctx = browser.new_context(viewport={"width": 1440, "height": 900})
+            page = ctx.new_page()
+            open_page(page, f"{args.base}/?mock=failed", [])
+            if not page.locator(".session .steps li[data-state='failed']").count():
+                failures.append("failed: no failed step in the track")
+            if not page.locator(".session button", has_text="Try again").count():
+                failures.append("failed: no Try again button")
             ctx.close()
         browser.close()
 

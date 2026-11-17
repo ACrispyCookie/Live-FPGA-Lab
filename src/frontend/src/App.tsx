@@ -11,13 +11,13 @@ import { TopBar } from './components/TopBar.tsx';
 import { Trace } from './components/Trace.tsx';
 import { mockState } from './dev/fixtures.ts';
 import { copy } from './lab/copy.ts';
-import { demoName, phase, timeLeft } from './lab/derive.ts';
+import { demoName, phase, tabTitle, timeLeft } from './lab/derive.ts';
 import { initialState, isLive, reduce } from './lab/reducer.ts';
+import { needsScroll } from './lab/scroll.ts';
 import { useLabSocket } from './lab/socket.ts';
 import type { Action, LabState } from './lab/types.ts';
 
 const TOAST_TTL_MS = 5200;
-const PHONE = '(max-width: 760px)';
 const reducer = (state: LabState, action: Action) => reduce(state, action, Date.now());
 const MOCK = import.meta.env.VITE_MOCK_STATES === '1';
 
@@ -43,6 +43,8 @@ export function App() {
   const [arrival, setArrival] = useState<string | null>(null);
   const autostartRef = useRef(false);
   const toastTimers = useRef<Record<string, number>>({});
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const [flash, setFlash] = useState(false);
 
   useEffect(() => {
     const timer = window.setInterval(() => dispatch({ type: 'tick', now: Date.now() }), 1000);
@@ -64,10 +66,22 @@ export function App() {
     return () => io.disconnect();
   }, []);
 
-  const scrollToSession = useCallback(() => {
-    if (!matchMedia(PHONE).matches) return;
-    const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
-    heroRef.current?.scrollIntoView({ block: 'start', behavior: reduce ? 'auto' : 'smooth' });
+  // Take the visitor to their session panel: scroll only if it isn't fully in view under the bar, then move focus
+  // to it and ring it once. Runs after the render, so the panel is measured in its new state.
+  const revealSession = useCallback(() => {
+    requestAnimationFrame(() => {
+      const panel = heroRef.current?.querySelector<HTMLElement>('.session');
+      if (!panel) return;
+      const bar = document.querySelector('.topbar')?.getBoundingClientRect().height ?? 0;
+      const r = panel.getBoundingClientRect();
+      if (needsScroll(r.top, r.bottom, innerHeight, bar)) {
+        const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+        panel.scrollIntoView({ block: 'start', behavior: reduce ? 'auto' : 'smooth' });
+      }
+      headingRef.current?.focus({ preventScroll: true });
+      setFlash(false);
+      requestAnimationFrame(() => setFlash(true));
+    });
   }, []);
 
   const onStart = useCallback((demoId: string) => {
@@ -75,8 +89,8 @@ export function App() {
     const requestId = send('session.create', { demo_id: demoId });
     if (MOCK) (window.__labDispatches ||= []).push('start.requested');
     dispatch({ type: 'start.requested', demoId, requestId });
-    scrollToSession();
-  }, [send, state.requesting, state.session, scrollToSession]);
+    revealSession();
+  }, [send, state.requesting, state.session, revealSession]);
 
   const onEnd = useCallback(() => {
     if (!isLive(state.session)) return;
@@ -98,6 +112,15 @@ export function App() {
   }, [state.ready, state.demos, state.session, state.board, onStart]);
 
   const p = phase(state);
+  const title = tabTitle(state);
+  useEffect(() => { document.title = title; }, [title]);
+
+  // a queued visitor's turn: bring the panel back into view wherever they are on the page
+  const prevPhase = useRef(p);
+  useEffect(() => {
+    if (prevPhase.current === 'queued' && p === 'starting') revealSession();
+    prevPhase.current = p;
+  }, [p, revealSession]);
   const online = state.ready && state.socket === 'connected' && p !== 'offline';
   const staged = p === 'active' && isLive(state.session) && Boolean(state.session.demo_url);
 
@@ -121,7 +144,7 @@ export function App() {
               <BoardPanel state={state} compact />
             </> : <>
               <BoardPanel state={state} />
-              <SessionPanel state={state} arrival={arrival} onCancel={onEnd} onEnd={onEnd} />
+              <SessionPanel state={state} arrival={arrival} onCancel={onEnd} onEnd={onEnd} onRetry={onStart} headingRef={headingRef} flash={flash} onFlashEnd={() => setFlash(false)} />
             </>}
           </section>
           <section className="sec" id="demos">

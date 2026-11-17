@@ -17,7 +17,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 OUT = Path(__file__).resolve().parent / "out"
-HEADLINE = ".session .big, .session .demo-name, .sbar .who"
+HEADLINE = ".session .now, .session .big, .session .demo-name, .sbar .who"
 
 
 def headline(page) -> str:
