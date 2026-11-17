@@ -134,11 +134,11 @@ export function App() {
             <p className="lead">{copy.recent.lead}</p>
             <RecentSessions state={state} />
           </section>
+          <footer className="foot" data-pad>
+            <span>{copy.site.partOf} <a href={copy.site.home}>njason.dev</a></span>
+            <a href={copy.site.source}>{copy.site.sourceLabel}</a>
+          </footer>
         </main>
-        <footer className="foot">
-          <span>{copy.site.partOf} <a href={copy.site.home}>njason.dev</a></span>
-          <a href={copy.site.source}>{copy.site.sourceLabel}</a>
-        </footer>
       </div>
     </>
   );

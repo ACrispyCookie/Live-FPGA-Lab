@@ -1,9 +1,21 @@
 /* Live FPGA Lab, in the portfolio's circuit-board world. Tokens come from /static/tokens.css (linked in index.html). */
+/* registered so getComputedStyle hands the trace its resolved position in px, not the calc() */
+@property --trace-x { syntax: '<length>'; inherits: true; initial-value: 18.5px; }
 :root {
-  --gutter: 68px; --trace-x: 18.5px; --gap: clamp(56px, 7vw, 96px); --bar: 62px;
+  /* a demo card at its narrowest comfortable width: the thumbnail (10em), a short description's measure (34ch), the Start button (7em) */
+  --card: calc(10em + 34ch + 7em);
+  --gap-s: clamp(.6rem, 1vw, .9rem);
+  /* the page holds at most three demo cards side by side */
+  --page: calc(3 * var(--card) + 2 * var(--gap-s));
+  /* the gutter carries the trace; the rail sits at the same share of it at every size (18.5 / 68) */
+  --gutter: clamp(2.5rem, 5vw, 4.25rem); --trace-x: calc(var(--gutter) * .272);
+  --gap: clamp(3.5rem, 7vw, 6rem);
+  /* the page edge: room for a thumb on phones, a little air on desktops */
+  --edge: clamp(.75rem, 2.5vw, 1.25rem);
+  --bar: 62px;
 }
 html { scroll-behavior: smooth; scroll-padding-top: calc(var(--bar) + 12px); }
-body { padding-left: max(20px, env(safe-area-inset-left, 0px)); padding-right: max(20px, env(safe-area-inset-right, 0px)); padding-bottom: 40px; }
+body { font-size: clamp(1rem, .97rem + .25vw, var(--t-body)); padding-left: max(var(--edge), env(safe-area-inset-left, 0px)); padding-right: max(var(--edge), env(safe-area-inset-right, 0px)); padding-bottom: var(--gap); }
 a { color: inherit; text-underline-offset: 3px; text-decoration-thickness: 1.5px; }
 h1, h2, h3, p { margin: 0; }
 h1, h2, h3 { font-family: var(--font-display); letter-spacing: -.02em; }
@@ -17,8 +29,8 @@ button { font: inherit; }
 .fallback a { color: var(--silk); }
 
 /* top bar: solid, the mirror of the portfolio's */
-.topbar { position: sticky; top: 0; z-index: 20; background: var(--mask); margin-inline: calc(-1 * max(20px, env(safe-area-inset-left, 0px))) calc(-1 * max(20px, env(safe-area-inset-right, 0px))); padding-inline: max(20px, env(safe-area-inset-left, 0px)) max(20px, env(safe-area-inset-right, 0px)); min-height: var(--bar); display: flex; align-items: center; }
-.topbar .in { width: 100%; max-width: 1200px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.topbar { position: sticky; top: 0; z-index: 20; background: var(--mask); margin-inline: calc(-1 * max(var(--edge), env(safe-area-inset-left, 0px))) calc(-1 * max(var(--edge), env(safe-area-inset-right, 0px))); padding-inline: max(var(--edge), env(safe-area-inset-left, 0px)) max(var(--edge), env(safe-area-inset-right, 0px)); min-height: var(--bar); display: flex; align-items: center; container: bar / inline-size; }
+.topbar .in { width: min(100%, calc(var(--page) + var(--gutter))); margin: 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .topbar .name { font: 700 1.08rem var(--font-display); text-decoration: none; letter-spacing: -.01em; padding: 8px 0; }
 .topbar nav { display: flex; gap: 2px; }
 .topbar nav a { text-decoration: none; padding: 8px 14px; border-radius: 999px; font-size: .95rem; color: var(--dim); transition: background .2s, color .2s; }
@@ -29,6 +41,8 @@ button { font: inherit; }
 .boardpill span { color: var(--dim); overflow: hidden; text-overflow: ellipsis; }
 .boardpill.tone-cyan span { color: var(--cyan); }
 .boardpill.tone-amber span { color: var(--amber); }
+/* when the name, the nav and the pill no longer fit on one line, the nav goes (the pill and the page carry it) */
+@container bar (inline-size < 44em) { .topbar nav { display: none; } .boardpill b { display: none; } }
 
 /* LED: a filled dot, breathing while online, blinking while programming */
 .led { width: 10px; height: 10px; border-radius: 50%; background: var(--led); flex: none; display: inline-block; }
@@ -52,7 +66,7 @@ button { font: inherit; }
 .tag { display: inline-flex; align-items: center; gap: 6px; background: var(--raised); border-radius: 999px; padding: 4px 11px; font-size: var(--t-small); color: var(--dim); white-space: nowrap; }
 
 /* the gutter and the trace */
-.wrap { position: relative; max-width: 1200px; margin: 0 auto; padding-left: var(--gutter); min-width: 0; }
+.wrap { position: relative; width: min(100%, calc(var(--page) + var(--gutter))); margin: 0 auto; padding-left: var(--gutter); min-width: 0; }
 .trace { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; z-index: 0; }
 .t-ghost, .t-drawn, .t-pulse, .t-stub { fill: none; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
 .t-ghost { stroke: var(--groove); }
@@ -86,16 +100,21 @@ main { position: relative; z-index: 1; display: grid; gap: var(--gap); padding-t
 .rec.loading .skel + .skel { margin-top: 6px; }
 
 /* hero: the component the trace lands on, and the visitor's own panel */
-.hero { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 400px); gap: 20px; align-items: start; min-width: 0; scroll-margin-top: calc(var(--bar) + 12px); }
-.hero.stage-first { grid-template-columns: 1fr; }
-.board { background: var(--panel); border-radius: var(--r-xl); overflow: hidden; display: grid; grid-template-rows: auto 1fr; min-width: 0; }
+/* the board takes two shares, the session one; they stack when both no longer fit at their own minimum */
+.hero { display: flex; flex-wrap: wrap; gap: var(--gap-s); align-items: flex-start; min-width: 0; scroll-margin-top: calc(var(--bar) + 12px); container: hero / inline-size; }
+.hero > .board { flex: 2 1 30em; }
+.hero > .session { flex: 1 1 20em; }
+.hero.stage-first > * { flex-basis: 100%; }
+.board { background: var(--panel); border-radius: var(--r-xl); overflow: hidden; display: grid; grid-template-rows: auto 1fr; min-width: 0; container: board / inline-size; }
 .band { background: var(--cyan); color: var(--ink); padding: 11px 22px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .band .title { display: flex; align-items: center; gap: 10px; font-weight: 600; }
-.board .body { padding: 22px; display: grid; gap: 18px; align-content: start; }
+.board .body { padding: clamp(1.1rem, 3vw, 1.4rem); display: grid; gap: 18px; align-content: start; }
 .ident h1 { font-size: var(--t-title); line-height: 1.05; font-weight: 800; letter-spacing: -.03em; }
 .ident p { color: var(--dim); margin-top: 4px; }
 .what { color: var(--silk); }
-.readouts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.readouts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 8em), 1fr)); gap: 10px; }
+/* a narrow board: the temperature and its sparkline get the full row under the other two */
+@container board (inline-size < 30em) { .ro.temp { grid-column: 1 / -1; order: 1; } }
 .ro { background: var(--raised); border-radius: var(--r-m); padding: 12px 14px; min-width: 0; display: grid; gap: 4px; align-content: start; }
 .ro small { color: var(--dim); font-size: var(--t-small); }
 .ro b { font: 700 var(--t-readout)/1.15 var(--font-display); overflow-wrap: anywhere; }
@@ -107,9 +126,10 @@ main { position: relative; z-index: 1; display: grid; gap: var(--gap); padding-t
 .ro .spark .base { stroke: var(--hover); stroke-width: 1.5; }
 .ro .when { color: var(--dim); font-size: var(--t-small); }
 .board.compact .what, .board.compact .ident p { display: none; }
-.board.compact .body { grid-template-columns: minmax(0, auto) minmax(0, 1fr); align-items: center; gap: 24px; padding: 16px 22px; }
+.board.compact .body { grid-template-columns: minmax(0, auto) minmax(0, 1fr); align-items: center; gap: 24px; }
+@container board (inline-size < 40em) { .board.compact .body { grid-template-columns: 1fr; } }
 
-.session { background: var(--panel); border-radius: var(--r-xl); padding: 22px; display: grid; gap: 16px; align-content: start; min-width: 0; }
+.session { background: var(--panel); border-radius: var(--r-xl); padding: clamp(1.1rem, 3vw, 1.4rem); display: grid; gap: 16px; align-content: start; min-width: 0; }
 .session h2 { font-size: var(--t-lead); line-height: 1.2; }
 .session .big { font: 800 clamp(2rem, 4vw, 2.8rem)/1 var(--font-display); letter-spacing: -.03em; }
 .session .big em { font-style: normal; color: var(--cyan); }
@@ -165,29 +185,19 @@ main { position: relative; z-index: 1; display: grid; gap: var(--gap); padding-t
 .rec time { color: var(--dim); font-size: var(--t-small); white-space: nowrap; }
 .empty { background: var(--panel); border-radius: var(--r-l); padding: 22px; color: var(--dim); }
 
-.foot { max-width: 1200px; margin: var(--gap) auto 0; padding-left: var(--gutter); display: flex; gap: 18px; flex-wrap: wrap; color: var(--dim); font-size: .95rem; }
+/* the footer is the last stop on the trace: same column, same gap as the sections above it */
+.foot { display: flex; gap: .5rem 1.2rem; flex-wrap: wrap; align-items: center; color: var(--dim); font-size: var(--t-small); }
 .foot a { color: var(--silk); }
 
 /* toasts: for the unexpected only */
-.toast-stack { position: fixed; top: max(74px, calc(env(safe-area-inset-top) + 74px)); right: max(18px, env(safe-area-inset-right)); z-index: 50; width: min(380px, calc(100vw - 28px)); display: grid; gap: 10px; pointer-events: none; }
+.toast-stack { position: fixed; top: calc(max(0px, env(safe-area-inset-top)) + var(--bar) + .75rem); right: max(var(--edge), env(safe-area-inset-right)); z-index: 50; width: min(24rem, calc(100vw - 2 * var(--edge))); display: grid; gap: 10px; pointer-events: none; }
 .toast { width: 100%; display: grid; grid-template-columns: 10px 1fr; gap: 12px; align-items: start; padding: 14px 15px; border-radius: var(--r-m); border: 0; background: var(--raised); color: var(--silk); text-align: left; font-size: var(--t-small); line-height: 1.4; cursor: pointer; pointer-events: auto; }
 .toast-dot { width: 10px; height: 10px; margin-top: 5px; border-radius: 999px; background: var(--dim); }
 .toast-success .toast-dot { background: var(--led); }
 .toast-warn .toast-dot, .toast-error .toast-dot { background: var(--amber); }
 .toast-info .toast-dot { background: var(--cyan); }
 
-@media (max-width: 1100px) { .hero { grid-template-columns: 1fr; } }
 @media (max-width: 760px) {
-  :root { --gutter: 42px; --trace-x: 11px; --bar: 56px; }
-  body { font-size: 1rem; padding-left: max(12px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
-  .topbar { margin-inline: calc(-1 * max(12px, env(safe-area-inset-left, 0px))) calc(-1 * max(16px, env(safe-area-inset-right, 0px))); padding-inline: max(12px, env(safe-area-inset-left, 0px)) max(16px, env(safe-area-inset-right, 0px)); }
-  .topbar nav { display: none; }
-  .boardpill b { display: none; }
-  .board .body { padding: 18px; }
-  .readouts, .board.compact .readouts { grid-template-columns: 1fr 1fr; }
-  .ro.temp { grid-column: 1 / -1; order: 1; }
-  .board.compact .body { grid-template-columns: 1fr; }
-  .session { padding: 18px; }
   .demo { grid-template-columns: 76px minmax(0, 1fr); gap: 10px 12px; padding: 12px; align-items: start; }
   .demo .text { gap: 2px; }
   .demo h3 { font-size: 1.15rem; }
@@ -197,6 +207,5 @@ main { position: relative; z-index: 1; display: grid; gap: var(--gap); padding-t
   .sbar { padding: 10px 12px; }
   .sbar .acts { margin-left: 0; width: 100%; }
   .sbar .acts .btn { flex: 1; }
-  .toast-stack { top: max(66px, calc(env(safe-area-inset-top) + 66px)); right: 10px; left: 10px; width: auto; }
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
