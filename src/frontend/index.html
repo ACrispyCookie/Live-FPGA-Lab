@@ -2,13 +2,21 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Live FPGA Lab</title>
-    <meta name="description" content="ECE hardware demos served from a homelab bench — live board access and control." />
+    <meta name="description" content="A real FPGA board in Jason Nikas's homelab. Pick a demo and run it on the board from your browser." />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/bricolage-grotesque-latin-wght-normal.woff2" />
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/hanken-grotesk-latin-wght-normal.woff2" />
+    <link rel="stylesheet" href="/tokens.css" />
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <main class="fallback">
+        <p>Live FPGA Lab: a real FPGA board in my homelab. This page needs JavaScript to connect to it.</p>
+        <p><a href="https://njason.dev">Back to njason.dev</a></p>
+      </main>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

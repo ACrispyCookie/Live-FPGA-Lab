@@ -7,5 +7,7 @@ export default defineConfig({
   build: {
     outDir: '../web_api/static',
     emptyOutDir: false,
+    // The fonts in public/ are referenced by absolute URL from tokens.css and the demo pages; never inline them.
+    assetsInlineLimit: 0,
   },
 });

@@ -7,7 +7,11 @@ COPY src/frontend/package*.json src/frontend/
 RUN npm install --prefix src/frontend
 
 COPY src/frontend src/frontend
+# VITE_MOCK_STATES=1 enables the ?mock=<state> switch in the built page (for design review only).
+ARG VITE_MOCK_STATES=0
+ENV VITE_MOCK_STATES=$VITE_MOCK_STATES
 RUN npm run build --prefix src/frontend
+RUN npm test --prefix src/frontend
 
 
 FROM python:3.13-slim AS runtime
