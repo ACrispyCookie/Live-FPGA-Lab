@@ -16,3 +16,7 @@ node_modules/
 src/frontend/node_modules/
 src/web_api/static
 .env
+
+# frontend browser checks: local environment and screenshots
+.venv-checks/
+src/frontend/checks/out/

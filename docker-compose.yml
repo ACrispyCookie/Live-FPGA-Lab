@@ -46,6 +46,8 @@ services:
     build:
       context: .
       dockerfile: docker/web-api.Dockerfile
+      args:
+        VITE_MOCK_STATES: ${VITE_MOCK_STATES:-0}
     image: fpga-demo/web-api:local
     container_name: fpga-web-api
     restart: unless-stopped
@@ -70,6 +72,7 @@ services:
       WEB_API_VIDEO_ENABLE_FILE: ${WEB_API_VIDEO_ENABLE_FILE:-/run/fpga-video-enabled}
       WEB_API_VIDEO_TRANSPORT: ${WEB_API_VIDEO_TRANSPORT:-webrtc}
       WEB_API_BOARD_LABEL: ${WEB_API_BOARD_LABEL:-}
+      WEB_API_RESERVED_FOR: ${WEB_API_RESERVED_FOR:-}
       WEB_API_PUBLIC_CORS_ORIGINS: ${WEB_API_PUBLIC_CORS_ORIGINS:-}
       DEMO_UART_PORT: ${DEMO_UART_PORT:-/dev/ttyUSB1}
       DEMO_UART_BAUD: ${DEMO_UART_BAUD:-115200}

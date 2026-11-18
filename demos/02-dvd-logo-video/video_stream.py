@@ -24,17 +24,17 @@ PAGE = """<!doctype html>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>DVD Logo HDMI output</title>
+  <link rel="stylesheet" href="/static/tokens.css" />
   <style>
-    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    :root { color-scheme: dark; }
     * { box-sizing: border-box; }
-    html, body { width: 100%; height: 100%; margin: 0; background: #05070a; color: #e6edf3; }
+    html, body { width: 100%; height: 100%; margin: 0; background: var(--mask); color: var(--silk); font: 14px/1.4 var(--font-text); }
     body { display: grid; place-items: center; overflow: hidden; }
     main { position: relative; width: 100%; height: 100%; display: grid; place-items: center; }
     img { display: block; width: 100%; height: 100%; object-fit: contain; }
     .badge { position: absolute; top: 14px; left: 14px; display: flex; align-items: center; gap: 8px;
-      padding: 7px 10px; border: 1px solid #30363d; border-radius: 999px;
-      background: rgb(13 17 23 / 82%); color: #e6edf3; font-size: 12px; }
-    .dot { width: 8px; height: 8px; border-radius: 50%; background: #3fb950; }
+      padding: 7px 12px; border-radius: 999px; background: var(--panel); color: var(--silk); font-size: 13px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--led); }
   </style>
 </head>
 <body>

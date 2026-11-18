@@ -13,6 +13,7 @@ from typing import Any
 DEMO_DEFINITION = {
     "id": "gpgpu-ripple",
     "name": "GPGPU ripple animation",
+    "thumbnail": "thumbnail.svg",
     "description": "The GPGPU renders an animated ripple frame after frame, shown live over HDMI.",
     "bitstream": "bitstream/gpgpu_platform.bit",
     "ps7_init_tcl": "boot/ps7_init.tcl",

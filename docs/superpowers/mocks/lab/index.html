@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Live FPGA Lab, styled mock</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="lab.css">
+</head>
+<body>
+<header class="topbar"><div class="in">
+  <a class="name" href="https://njason.dev">Jason Nikas</a>
+  <nav aria-label="Sections"><a href="#session">Session</a><a href="#demos">Demos</a><a href="#recent">Recent</a></nav>
+  <a class="boardpill" href="#board" id="pill"><i class="led" id="pill-led"></i><b>Smart Zynq SL</b><span id="pill-status">Idle</span></a>
+</div></header>
+
+<div class="wrap" id="top" data-trace>
+<main>
+
+  <section class="hero" id="board" aria-label="The board and your session">
+    <div class="board" id="boardpanel">
+      <div class="band" data-pad><span class="title"><i class="led" id="band-led"></i>Live FPGA Lab</span>
+        <svg class="pins" width="66" height="13" viewBox="0 0 66 13" aria-hidden="true"><circle cx="6.5" cy="6.5" r="5.5" fill="#d8b46a" stroke="#a8873f" stroke-width="2"/><circle cx="24.2" cy="6.5" r="5.5" fill="#d8b46a" stroke="#a8873f" stroke-width="2"/><circle cx="41.9" cy="6.5" r="5.5" fill="#d8b46a" stroke="#a8873f" stroke-width="2"/><circle cx="59.6" cy="6.5" r="5.5" fill="#d8b46a" stroke="#a8873f" stroke-width="2"/></svg></div>
+      <div class="body">
+        <div class="ident"><h1>Smart Zynq SL</h1><p>Xilinx xc7z020, on the bench in my homelab.</p></div>
+        <p class="what">One real board, one visitor at a time. Pick a demo and the board is programmed for you; if someone else is on it, you queue and get your turn.</p>
+        <div class="readouts" id="readouts"></div>
+      </div>
+    </div>
+    <div class="session" id="session"></div>
+  </section>
+
+  <section class="sec" id="demos">
+    <h2 data-pad>Demos</h2>
+    <p class="lead">Each one programs the board with a different design. The n-body demo talks to the board over UART and draws in your browser; the others are captured from the board's HDMI output.</p>
+    <div class="demolist" id="demolist"></div>
+  </section>
+
+  <section class="sec" id="recent">
+    <h2 data-pad>Recent sessions</h2>
+    <p class="lead">Who had the board lately, and how it ended.</p>
+    <div class="reclist" id="reclist"></div>
+  </section>
+
+</main>
+<footer class="foot">
+  <span>Part of <a href="https://njason.dev">njason.dev</a></span>
+  <a href="https://github.com/ACrispyCookie/Live-FPGA-Lab">Source on GitHub</a>
+</footer>
+</div>
+
+<!-- mock only: state switcher -->
+<nav class="mockbar" aria-label="Mock states"><span>State</span><a href="?state=idle">idle</a><a href="?state=busy">busy</a><a href="?state=arrival">arrival</a><a href="?state=queued">queued</a><a href="?state=starting">starting</a><a href="?state=active">active</a><a href="?state=ending">ending</a><a href="?state=project">project</a><a href="?state=fault">fault</a><a href="?state=offline">offline</a><a href="?state=connecting">connecting</a></nav>
+<script src="lab.js"></script>
+</body>
+</html>

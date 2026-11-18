@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import asyncio
 import logging
 from collections.abc import AsyncIterator
@@ -170,6 +172,7 @@ class BoardManager:
                 "fpga": state.target_ctx.fpga_name if state else None,
                 "status": FPGAStatus.OFFLINE.value,
                 "mode": None,
+                "reserved_for": self.config.reserved_for,
                 "temperature_c": None,
                 "healthy": False,
                 "faults": [],
@@ -186,6 +189,7 @@ class BoardManager:
             "fpga": state.target_ctx.fpga_name,
             "status": state.status.value,
             "mode": getattr(state.mode, "value", state.mode),
+            "reserved_for": self.config.reserved_for,
             "temperature_c": round(temperature, 1) if temperature is not None else None,
             "healthy": not state.faults,
             "faults": sorted({fault.type.value for fault in state.faults}),
@@ -799,6 +803,8 @@ class BoardManager:
             "device_name": self.fpga_state.target_ctx.fpga_name,
             "status": self.fpga_state.status.value,
             "mode": self.fpga_state.mode,
+            "label": self.config.board_label,
+            "reserved_for": self.config.reserved_for,
             "bitstream_id": self.fpga_state.bitstream_id,
             "telemetry": self.fpga_state.telemetry.model_dump(mode="json"),
             "faults": [
@@ -809,9 +815,15 @@ class BoardManager:
 
     @staticmethod
     def _public_demo(demo: Any) -> dict[str, Any]:
+        thumbnail = getattr(demo, "thumbnail", None)
         result = {
             "id": getattr(demo, "id"),
             "name": getattr(demo, "name"),
+            "thumbnail_url": (
+                f"/api/demos/{getattr(demo, 'id')}/thumbnail"
+                if thumbnail is not None and Path(thumbnail).is_file()
+                else None
+            ),
         }
 
         description = getattr(demo, "description", None)

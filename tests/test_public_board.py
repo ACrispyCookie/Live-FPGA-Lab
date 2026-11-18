@@ -49,6 +49,7 @@ def test_snapshot_is_public_safe():
         "fpga": "xc7z020",
         "status": "idle",
         "mode": "demo",
+        "reserved_for": "owner projects",
         "temperature_c": 45.6,
         "healthy": True,
         "faults": [],

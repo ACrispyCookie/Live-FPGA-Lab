@@ -1,0 +1,64 @@
+/* Copied from the portfolio's docs/DESIGN_SYSTEM.md (ACrispyCookie/portfolio). Change there first, then here.
+   Served as /static/tokens.css so the lab page and the embedded demo pages share one source. */
+:root {
+  --mask: #0b1d21;
+  --panel: #11282d;
+  --raised: #183539;
+  --hover: #1f4248;
+  --lift: #28525a;
+  --silk: #eaf2f1;
+  --dim: #9db6b8;
+  --groove: #183539;
+  --copper: #3b7a82;
+  --cyan: #41e2f2;
+  --ink: #05252a;
+  --gold: #d8b46a;
+  --gold-ring: #a8873f;
+  --led: #5dffa8;
+  --amber: #f0a64a;
+  --fault: #ff6b5e;
+
+  --font-display: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  --font-text: "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --t-title: clamp(1.9rem, 3.2vw, 2.6rem);
+  --t-lead: 1.3rem;
+  --t-body: 1.0625rem;
+  --t-small: .875rem;
+  --t-readout: 1.25rem;
+
+  --r-xl: 28px;
+  --r-l: 22px;
+  --r-m: 16px;
+
+  color-scheme: dark;
+}
+
+@font-face {
+  font-family: "Bricolage Grotesque";
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+  src: url(/static/fonts/bricolage-grotesque-latin-wght-normal.woff2) format("woff2-variations");
+}
+@font-face {
+  font-family: "Hanken Grotesk";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url(/static/fonts/hanken-grotesk-latin-wght-normal.woff2) format("woff2-variations");
+}
+
+* { box-sizing: border-box; }
+html { scrollbar-color: var(--hover) var(--mask); }
+body {
+  margin: 0;
+  background: var(--mask);
+  color: var(--silk);
+  font: var(--t-body)/1.6 var(--font-text);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+::selection { background: var(--cyan); color: var(--ink); }
+:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; border-radius: 10px; }
