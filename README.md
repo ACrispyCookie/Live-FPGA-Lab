@@ -1,8 +1,12 @@
 # Live FPGA Lab
 
-Live FPGA Lab is a small web platform for serving approved FPGA demos from a homelab bench. It combines an ECE-style hardware demo flow — programming a real board, running one demo at a time, and handling faults — with a browser UI that manages users, queueing, session handoff, and demo embedding.
+Live FPGA Lab is a small web platform that serves FPGA demos from a homelab bench. Visitors queue in the browser; when their turn comes, the server programs a real board with the chosen demo, embeds it in the page, and hands the board to the next person when the session ends or a fault occurs.
 
-The current app is built around one physical FPGA board and one active user session at a time.
+It currently drives one physical board with one active session at a time.
+
+<p align="center">
+  <img src="docs/images/architecture.svg" alt="Live FPGA Lab architecture: browser, web-api, fpga-agent, and FPGA board, with the HDMI capture path streaming video back to the browser" width="100%">
+</p>
 
 ## What is in this repository?
 
@@ -203,7 +207,7 @@ uv run web-api
 1. A visitor opens `/`.
 2. The web API assigns an anonymous `fpga_user` cookie if one does not exist.
 3. The frontend opens `/api/ws` using subprotocol `fpga-demo.v1`.
-4. The WebSocket sends an initial state packet containing:
+4. The WebSocket sends an initial state message containing:
    - board state
    - available demos
    - this user’s queue state
@@ -251,7 +255,7 @@ The browser sends commands such as:
 
 ## Public board status
 
-Two read-only endpoints let other sites (e.g. a portfolio) show the board's state. They need no cookie, never create an anonymous user, and expose only a public-safe summary: no device serial, JTAG context, bitstream ids, raw fault payloads, or user/session ids.
+Two read-only endpoints let other sites, such as a portfolio, show the board's state. They need no cookie, never create an anonymous user, and expose only a public-safe summary: no device serial, JTAG context, bitstream ids, raw fault payloads, or user/session ids.
 
 ```text
 GET /api/public/board          JSON snapshot (Cache-Control: max-age=10)
@@ -327,7 +331,7 @@ inside the authenticated demo iframe and in a new tab; video uses `object-fit:
 contain` to preserve its aspect ratio on phones and desktops. By default FFmpeg
 passes the card's MJPEG output into a browser-compatible multipart stream.
 
-The DVD logo bitstream is intentionally not included. Add it as:
+The DVD logo bitstream is not included. Add it as:
 
 ```text
 demos/dvd-logo-video/bitstream/dvd_logo.bit
@@ -352,7 +356,7 @@ docker exec fpga-web-api fpga-video disable
 When enabled, open `/video`. All viewers share one FFmpeg capture process. With
 no queued HDMI demo active, capture starts on the first viewer and stops when the
 last viewer disconnects or the endpoint is disabled. The enable state is
-intentionally ephemeral and returns to disabled when the container is recreated.
+not persisted; it resets to disabled when the container is recreated.
 
 The standalone endpoint and queued HDMI demo share one capture producer, so
 both can be viewed at the same time. Disabling `/video` only closes standalone
